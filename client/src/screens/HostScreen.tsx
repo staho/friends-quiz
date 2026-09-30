@@ -146,7 +146,8 @@ function QuestionBoard({
   const question = snapshot.question
   const left = useCountdown(question?.remainingMs ?? null, question != null)
   if (!question) return null
-  const locked = snapshot.players.filter((player) => player.locked).length
+  const active = snapshot.players.filter((player) => player.connected)
+  const locked = active.filter((player) => player.locked).length
   return (
     <section className="board">
       <p className="kicker">
@@ -156,7 +157,7 @@ function QuestionBoard({
       <TimerBar leftMs={left} durationMs={question.durationMs} />
       <AnswerGrid choices={question.choices} selected={null} />
       <p className="hint">
-        {locked} of {snapshot.players.length} locked in
+        {locked} of {active.length} locked in
       </p>
       <div className="controls">
         <button type="button" className="btn ghost" disabled={busy} onClick={onEnd}>

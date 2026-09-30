@@ -260,14 +260,20 @@ button { touch-action: manipulation; }
 .stage.phone {
   max-width: 520px;
   margin: 0 auto;
-  padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+  height: 100dvh;
+  padding: 16px 16px calc(12px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .join, .phone-wait {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  min-height: calc(100dvh - 36px);
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
 }
 
 .join h1, .phone-wait h1 {
@@ -295,9 +301,10 @@ button { touch-action: manipulation; }
 .join .btn, .lockbar .btn { width: 100%; }
 
 .phone-play {
-  min-height: calc(100dvh - 36px);
+  flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 12px;
 }
 
@@ -308,11 +315,14 @@ button { touch-action: manipulation; }
 }
 
 .answer-grid.phone {
-  align-content: stretch;
+  min-height: 0;
+  height: 100%;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 .answer-grid.phone .answer {
-  min-height: 28vw;
+  min-height: 0;
+  height: 100%;
   width: 100%;
 }
 
@@ -320,6 +330,10 @@ button { touch-action: manipulation; }
   display: flex;
   flex-direction: column;
   gap: 8px;
+  position: sticky;
+  bottom: 0;
+  padding-top: 8px;
+  background: linear-gradient(180deg, rgba(20, 14, 10, 0), #140e0a 28%);
 }
 
 .lockbar .hint { margin: 0; }
