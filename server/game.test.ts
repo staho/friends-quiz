@@ -1,0 +1,229 @@
+import assert from "node:assert/strict"
+import { describe, it } from "node:test"
+import { BASE_POINTS, MAX_SPEED_BONUS, QUESTIONS_PER_ROUND } from "../shared/types.ts"
+import {
+  GameError,
+  applyTick,
+  createRoom,
+  endGame,
+  joinPlayer,
+  lockAnswer,
+  nextQuestion,
+  resetRound,
+  scoreAnswer,
+  selectRound,
+  snapshotFor,
+  startGame,
+  submitChoice,
+  type Question,
+  type Room,
+} from "./game.ts"
+import { loadQuestionPack, parseQuestions } from "./questions.ts"
+
+const duration = 20_000
+
+function question(id: string, correctIndex: 0 | 1 | 2 | 3): Question {
+  return {
+    id,
+    prompt: `Prompt ${id}`,
+    choices: ["Red", "Blue", "Gold", "Green"],
+    correctIndex,
+  }
+}
+
+function roomWith(questions: Question[]): Room {
+  return createRoom({
+    code: "QUIZ",
+    hostToken: "host",
+    questions,
+    questionDurationMs: duration,
+  })
+}
+
+function addPlayer(room: Room, id: string, name: string): Room {
+  return joinPlayer(room, { id, name, token: `token-${id}` }).room
+}
+
+describe("scoring", () => {
+  it("gives a wrong answer nothing", () => {
+    assert.equal(scoreAnswer(false, 0, duration), 0)
+  })
+
+  it("gives an instant correct answer the full speed bonus", () => {
+    assert.equal(scoreAnswer(true, 0, duration), BASE_POINTS + MAX_SPEED_BONUS)
+  })
+
+  it("gives a last-moment correct answer the base only", () => {
+    assert.equal(scoreAnswer(true, duration, duration), BASE_POINTS)
+  })
+
+  it("splits the speed bonus halfway through", () => {
+    assert.equal(scoreAnswer(true, duration / 2, duration), BASE_POINTS + MAX_SPEED_BONUS / 2)
+  })
+})
+
+describe("joining", () => {
+  it("adds a player in the lobby", () => {
+    const room = addPlayer(roomWith([question("a", 0)]), "p1", "Ada")
+    assert.equal(room.players.length, 1)
+    assert.equal(room.players[0]?.name, "Ada")
+  })
+
+  it("rejects an empty name", () => {
+    assert.throws(() => addPlayer(roomWith([question("a", 0)]), "p1", "   "), GameError)
+  })
+
+  it("rejects a duplicate name while that player is connected", () => {
+    const room = addPlayer(roomWith([question("a", 0)]), "p1", "Ada")
+    assert.throws(() => addPlayer(room, "p2", "ada"), /taken/)
+  })
+
+  it("lets a disconnected player reclaim the same name", () => {
+    let room = addPlayer(roomWith([question("a", 0)]), "p1", "Ada")
+    room = { ...room, players: room.players.map((player) => ({ ...player, connected: false })) }
+    const rejoined = joinPlayer(room, { id: "p2", name: "Ada", token: "new" })
+    assert.equal(rejoined.player.id, "p1")
+    assert.equal(rejoined.player.token, "new")
+    assert.equal(rejoined.player.connected, true)
+  })
+
+  it("refuses a new player after the round starts", () => {
+    let room = addPlayer(roomWith([question("a", 0)]), "p1", "Ada")
+    room = startGame(room, 0)
+    assert.throws(() => addPlayer(room, "p2", "Bea"), /already started/)
+  })
+})
+
+describe("answers", () => {
+  it("keeps one answer per player and lets them change it until lock", () => {
+    let room = addPlayer(roomWith([question("a", 0)]), "p1", "Ada")
+    room = addPlayer(room, "p2", "Bea")
+    room = startGame(room, 1_000)
+    room = submitChoice(room, "p1", 1, 1_200)
+    room = submitChoice(room, "p1", 0, 1_400)
+    room = submitChoice(room, "p2", 3, 1_500)
+    room = lockAnswer(room, "p1", 2_000)
+    assert.throws(() => submitChoice(room, "p1", 2, 2_100), /locked/)
+    assert.equal(room.answers.p1?.choiceIndex, 0)
+    assert.equal(room.answers.p2?.choiceIndex, 3)
+    assert.equal(room.answers.p2?.locked, false)
+  })
+
+  it("ignores an answer after the timer", () => {
+    let room = addPlayer(roomWith([question("a", 0)]), "p1", "Ada")
+    room = startGame(room, 0)
+    assert.throws(() => submitChoice(room, "p1", 0, duration), /Time is up/)
+  })
+
+  it("reveals when the timer expires and scores an unlocked pick slowly", () => {
+    let room = addPlayer(roomWith([question("a", 0)]), "p1", "Ada")
+    room = startGame(room, 0)
+    room = submitChoice(room, "p1", 0, 100)
+    room = applyTick(room, duration)
+    assert.equal(room.phase, "reveal")
+    assert.equal(room.reveal?.correctIndex, 0)
+    assert.equal(room.players[0]?.score, BASE_POINTS)
+  })
+
+  it("reveals early when every connected player has locked", () => {
+    let room = addPlayer(roomWith([question("a", 0)]), "p1", "Ada")
+    room = startGame(room, 0)
+    room = submitChoice(room, "p1", 0, 10)
+    room = lockAnswer(room, "p1", 0)
+    room = applyTick(room, 0)
+    assert.equal(room.phase, "reveal")
+    assert.equal(room.players[0]?.score, BASE_POINTS + MAX_SPEED_BONUS)
+  })
+
+  it("scores a wrong answer as zero", () => {
+    let room = addPlayer(roomWith([question("a", 1)]), "p1", "Ada")
+    room = startGame(room, 0)
+    room = submitChoice(room, "p1", 0, 10)
+    room = lockAnswer(room, "p1", 10)
+    room = applyTick(room, 10)
+    assert.equal(room.players[0]?.score, 0)
+    assert.equal(room.reveal?.results[0]?.correct, false)
+  })
+
+  it("hides the correct answer until reveal", () => {
+    let room = addPlayer(roomWith([question("a", 2)]), "p1", "Ada")
+    room = startGame(room, 0)
+    const during = snapshotFor(room, { role: "player", playerId: "p1" }, 0, [])
+    assert.equal(during.reveal, null)
+    assert.equal(during.question?.prompt, "Prompt a")
+    assert.equal("correctIndex" in (during.question ?? {}), false)
+    room = submitChoice(room, "p1", 2, 10)
+    room = lockAnswer(room, "p1", 10)
+    room = applyTick(room, 10)
+    const after = snapshotFor(room, { role: "player", playerId: "p1" }, 10, [])
+    assert.equal(after.reveal?.correctIndex, 2)
+    assert.equal(after.you.role === "player" ? after.you.choiceIndex : null, 2)
+  })
+})
+
+describe("round flow", () => {
+  it("moves to the next question and then finishes", () => {
+    let room = addPlayer(roomWith([question("a", 0), question("b", 1)]), "p1", "Ada")
+    room = startGame(room, 0)
+    room = submitChoice(room, "p1", 0, 0)
+    room = lockAnswer(room, "p1", 0)
+    room = applyTick(room, 0)
+    room = nextQuestion(room, 5_000)
+    assert.equal(room.phase, "question")
+    assert.equal(room.questionIndex, 1)
+    assert.equal(room.reveal, null)
+    room = submitChoice(room, "p1", 1, 5_100)
+    room = lockAnswer(room, "p1", 5_100)
+    room = applyTick(room, 5_100)
+    room = nextQuestion(room, 9_000)
+    assert.equal(room.phase, "finished")
+    assert.ok((room.players[0]?.score ?? 0) > 0)
+  })
+
+  it("ends early without scoring the open question", () => {
+    let room = addPlayer(roomWith([question("a", 0)]), "p1", "Ada")
+    room = startGame(room, 0)
+    room = submitChoice(room, "p1", 0, 10)
+    room = endGame(room)
+    assert.equal(room.phase, "finished")
+    assert.equal(room.players[0]?.score, 0)
+  })
+
+  it("starts a fresh lobby on reset", () => {
+    let room = addPlayer(roomWith([question("a", 0)]), "p1", "Ada")
+    room = startGame(room, 0)
+    room = applyTick(room, duration)
+    room = resetRound(room, [question("b", 1), question("c", 2)])
+    assert.equal(room.phase, "lobby")
+    assert.equal(room.players[0]?.score, 0)
+    assert.equal(room.questions.length, 2)
+    assert.equal(room.reveal, null)
+  })
+})
+
+describe("question pack", () => {
+  it("shuffles a 10-question round without changing the pack", () => {
+    const pack = Array.from({ length: 12 }, (_, index) => question(`q${index}`, 0))
+    const round = selectRound(pack, QUESTIONS_PER_ROUND, () => 0.42)
+    assert.equal(round.length, QUESTIONS_PER_ROUND)
+    assert.equal(pack.length, 12)
+    const again = selectRound(pack, QUESTIONS_PER_ROUND, () => 0.42)
+    assert.deepEqual(again.map((item) => item.id), round.map((item) => item.id))
+  })
+
+  it("loads the local pack", () => {
+    const pack = loadQuestionPack()
+    assert.ok(pack.length >= QUESTIONS_PER_ROUND)
+    for (const item of pack) {
+      assert.equal(item.choices.length, 4)
+      assert.ok(item.correctIndex >= 0 && item.correctIndex <= 3)
+    }
+  })
+
+  it("rejects a question that does not have four answers", () => {
+    assert.throws(
+      () => parseQuestions([{ id: "bad", prompt: "Huh?", choices: ["Only"], correctIndex: 0 }]),
+      /four answers/,
+    )
+  })
+})
