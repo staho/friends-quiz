@@ -18,7 +18,8 @@ import {
   type Question,
   type Room,
 } from "./game.ts"
-import { loadQuestionPack, parseQuestions } from "./questions.ts"
+import { loadQuestionPack } from "./loadQuestions.ts"
+import { parseQuestions } from "./questions.ts"
 
 const duration = 20_000
 

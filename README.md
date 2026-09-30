@@ -9,20 +9,13 @@ npm install
 npm run dev
 ```
 
-Open the TV at [http://localhost:5173/host](http://localhost:5173/host). The screen shows a room code and a join address. Players on the same Wi-Fi open that address, enter the code and a name, then pick an answer.
+Open the TV at [http://localhost:8787/host](http://localhost:8787/host). The screen shows a room code and a join address. Players open that address, enter the code and a name, then pick an answer.
 
-`npm run dev` serves the site through Vite on port 5173 and proxies the game socket to the API on port 3000. Phones only need to reach port 5173.
-
-To play from one process instead:
-
-```bash
-npm run build
-npm start
-```
-
-The TV is then [http://localhost:3000/host](http://localhost:3000/host). The server listens on `0.0.0.0` and prints the LAN address. Set `PORT` if 3000 is taken.
+`npm run dev` builds the site and serves it with Wrangler. On your own Wi-Fi, open the network address Wrangler prints so phones can reach the TV's URL.
 
 Refresh the TV to get back to the same room. Use **New round** after the podium to keep the room code, clear scores, and deal a new set of questions.
+
+Pushes to `main` deploy the Worker. Pull requests run the tests.
 
 ## Round
 
@@ -34,7 +27,7 @@ Refresh the TV to get back to the same room. Use **New round** after the podium 
 
 A correct answer scores 500 points, plus up to 500 more for an instant lock. A correct answer as the timer ends scores 500. A wrong answer or no answer scores 0. The formula is `scoreAnswer` in [`server/game.ts`](server/game.ts).
 
-Add questions to the JSON pack (`prompt`, four `choices`, and `correctIndex` from 0 to 3). Restart the server so it reloads the file.
+Add questions to the JSON pack (`prompt`, four `choices`, and `correctIndex` from 0 to 3). Deploy again so the Worker picks up the file.
 
 ## Tests
 
