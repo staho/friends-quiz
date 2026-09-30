@@ -16,5 +16,6 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomDurableObject"] }],
   "observability": {
     "enabled": true
-  }
+  },
+  "routes": [{ "pattern": "friends-quiz.staho.dev", "custom_domain": true }]
 }

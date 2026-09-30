@@ -15,7 +15,7 @@ Open the TV at [http://localhost:8787/host](http://localhost:8787/host). The scr
 
 Refresh the TV to get back to the same room. Use **New round** after the podium to keep the room code, clear scores, and deal a new set of questions.
 
-Pushes to `main` deploy the Worker. Pull requests run the tests.
+Pushes to `main` deploy the Worker to [friends-quiz.staho.dev](https://friends-quiz.staho.dev). Pull requests run the tests.
 
 ## Round
 
