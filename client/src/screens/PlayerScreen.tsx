@@ -76,14 +76,25 @@ export function PlayerScreen() {
       ) : playing ? (
         <Play snapshot={playing} onError={setError} />
       ) : (
-        <form className="join" onSubmit={(event) => void join(event)}>
+        <form
+          className="join"
+          method="post"
+          action="#"
+          autoComplete="off"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void join(event)
+          }}
+        >
           <p className="eyebrow">Friends quiz</p>
           <h1>Grab a seat</h1>
           <label>
             Room code
             <input
+              name="quiz-room-code"
               value={code}
               onChange={(event) => setCode(event.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4))}
+              autoComplete="quiz-room-code"
               autoCapitalize="characters"
               autoCorrect="off"
               spellCheck={false}
@@ -95,8 +106,10 @@ export function PlayerScreen() {
           <label>
             Your name
             <input
+              name="quiz-player-name"
               value={name}
               onChange={(event) => setName(event.target.value)}
+              autoComplete="quiz-player-name"
               maxLength={16}
               required
               autoFocus={code.length === 4}

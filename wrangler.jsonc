@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "friends-quiz",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./client/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/ws/*"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "ROOM", "class_name": "RoomDurableObject" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomDurableObject"] }],
+  "observability": {
+    "enabled": true
+  },
+  "routes": [{ "pattern": "friends-quiz.staho.dev", "custom_domain": true }]
+}

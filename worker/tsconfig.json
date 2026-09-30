@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "types": [],
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true
+  },
+  "include": [
+    "./**/*.ts",
+    "../server/game.ts",
+    "../server/questions.ts",
+    "../shared/**/*.ts",
+    "../worker-configuration.d.ts",
+    "../data/questions.json"
+  ]
+}
