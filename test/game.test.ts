@@ -18,7 +18,7 @@ import {
   submitChoice,
   type Question,
   type Room,
-} from "./game.ts"
+} from "../server/game.ts"
 
 const duration = 20_000
 

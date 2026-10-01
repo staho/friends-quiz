@@ -5,8 +5,8 @@ import path from "node:path"
 import { describe, it } from "node:test"
 import { fileURLToPath } from "node:url"
 import { QUESTIONS_PER_ROUND } from "../shared/types.ts"
-import { listCategories, listQuestions, pickRandomQuestion, questionsFromRows, type StatementDatabase } from "./catalog.ts"
-import { GameError } from "./game.ts"
+import { listCategories, listQuestions, pickRandomQuestion, questionsFromRows, type StatementDatabase } from "../server/catalog.ts"
+import { GameError } from "../server/game.ts"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 

@@ -145,24 +145,17 @@ export function createRoom(options: {
   }
 }
 
+type StoredRoom = Partial<Room> & { questions?: Question[] }
+
 export function restoreRoom(raw: unknown): Room {
-  if (!raw || typeof raw !== "object") throw new GameError("Room not found")
-  const value = raw as Partial<Room> & { questions?: Question[] }
-  if (typeof value.code !== "string" || typeof value.hostToken !== "string") {
-    throw new GameError("Room not found")
-  }
-  const phase = value.phase ?? "lobby"
-  const legacy = Array.isArray(value.questions) ? value.questions : null
-  const asked = Array.isArray(value.asked)
-    ? value.asked
-    : legacy && (phase === "question" || phase === "reveal" || phase === "finished")
-      ? legacy.slice(0, (value.questionIndex ?? 0) + 1)
-      : []
+  const value = readStoredRoom(raw)
+  const phase = readPhase(value.phase)
+  const legacy = readLegacyQuestions(value)
   return {
     code: value.code,
     hostToken: value.hostToken,
     players: value.players ?? [],
-    asked,
+    asked: readAsked(value, phase, legacy),
     history: value.history ?? [],
     questionLimit: value.questionLimit ?? (legacy?.length || QUESTIONS_PER_ROUND),
     questionIndex: value.questionIndex ?? 0,
@@ -172,6 +165,32 @@ export function restoreRoom(raw: unknown): Room {
     answers: value.answers ?? {},
     reveal: value.reveal ?? null,
   }
+}
+
+function readStoredRoom(raw: unknown): StoredRoom & { code: string; hostToken: string } {
+  if (!raw || typeof raw !== "object") throw new GameError("Room not found")
+  const value = raw as StoredRoom
+  const code = value.code
+  const hostToken = value.hostToken
+  if (typeof code !== "string" || typeof hostToken !== "string") {
+    throw new GameError("Room not found")
+  }
+  return { ...value, code, hostToken }
+}
+
+function readPhase(phase: Room["phase"] | undefined): Room["phase"] {
+  if (phase === "question" || phase === "reveal" || phase === "finished") return phase
+  return "lobby"
+}
+
+function readLegacyQuestions(value: StoredRoom): Question[] | null {
+  return Array.isArray(value.questions) ? value.questions : null
+}
+
+function readAsked(value: StoredRoom, phase: Room["phase"], legacy: Question[] | null): Question[] {
+  if (Array.isArray(value.asked)) return value.asked
+  if (!legacy || phase === "lobby") return []
+  return legacy.slice(0, (value.questionIndex ?? 0) + 1)
 }
 
 export function joinPlayer(

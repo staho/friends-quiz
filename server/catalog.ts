@@ -119,33 +119,50 @@ export function questionsFromRows(rows: readonly QuestionRow[]): Question[] {
 function questionFromRows(rows: readonly QuestionRow[]): Question {
   const first = rows[0]
   if (!first) throw new GameError("Question is missing")
-  if (rows.length !== 4) throw new GameError(`Question ${first.id} needs four answers`)
+  const choices = readChoices(first.id, rows)
+  const text = readQuestionText(first)
+  return {
+    id: first.id,
+    prompt: text.prompt,
+    choices: choices.choices,
+    correctIndex: choices.correctIndex,
+    category: text.category,
+    difficulty: Number(first.difficulty),
+  }
+}
+
+function readChoices(
+  id: string,
+  rows: readonly QuestionRow[],
+): { choices: [string, string, string, string]; correctIndex: ChoiceIndex } {
+  if (rows.length !== 4) throw new GameError(`Question ${id} needs four answers`)
   const choices = ["", "", "", ""] as [string, string, string, string]
   let correctIndex: ChoiceIndex | null = null
   for (const row of rows) {
-    if (!isChoiceIndex(row.position)) throw new GameError(`Question ${first.id} has an invalid answer slot`)
-    if (choices[row.position] !== "") throw new GameError(`Question ${first.id} repeats an answer slot`)
-    const text = row.text.trim()
-    if (!text) throw new GameError(`Question ${first.id} has an empty answer`)
-    choices[row.position] = text
-    if (Number(row.is_correct) === 1) {
-      if (correctIndex != null) throw new GameError(`Question ${first.id} has more than one correct answer`)
-      correctIndex = row.position
-    }
+    const slot = readChoiceSlot(id, row)
+    if (choices[slot.position] !== "") throw new GameError(`Question ${id} repeats an answer slot`)
+    choices[slot.position] = slot.text
+    if (!slot.correct) continue
+    if (correctIndex != null) throw new GameError(`Question ${id} has more than one correct answer`)
+    correctIndex = slot.position
   }
-  if (correctIndex == null) throw new GameError(`Question ${first.id} has no correct answer`)
-  const prompt = first.prompt.trim()
-  const category = first.category.trim()
-  if (!prompt) throw new GameError(`Question ${first.id} is missing a prompt`)
-  if (!category) throw new GameError(`Question ${first.id} is missing a category`)
-  return {
-    id: first.id,
-    prompt,
-    choices,
-    correctIndex,
-    category,
-    difficulty: Number(first.difficulty),
-  }
+  if (correctIndex == null) throw new GameError(`Question ${id} has no correct answer`)
+  return { choices, correctIndex }
+}
+
+function readChoiceSlot(id: string, row: QuestionRow): { position: ChoiceIndex; text: string; correct: boolean } {
+  if (!isChoiceIndex(row.position)) throw new GameError(`Question ${id} has an invalid answer slot`)
+  const text = row.text.trim()
+  if (!text) throw new GameError(`Question ${id} has an empty answer`)
+  return { position: row.position, text, correct: Number(row.is_correct) === 1 }
+}
+
+function readQuestionText(row: QuestionRow): { prompt: string; category: string } {
+  const prompt = row.prompt.trim()
+  const category = row.category.trim()
+  if (!prompt) throw new GameError(`Question ${row.id} is missing a prompt`)
+  if (!category) throw new GameError(`Question ${row.id} is missing a category`)
+  return { prompt, category }
 }
 
 function isChoiceIndex(value: number): value is ChoiceIndex {
