@@ -1,8 +1,9 @@
 import type { HostSession } from "../shared/types.ts"
 import { GameError } from "../server/game.ts"
+import { CatalogDurableObject } from "./catalog.ts"
 import { RoomDurableObject } from "./room.ts"
 
-export { RoomDurableObject }
+export { CatalogDurableObject, RoomDurableObject }
 
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ"
 

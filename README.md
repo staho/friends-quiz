@@ -27,7 +27,7 @@ Pushes to `main` deploy the Worker to [friends-quiz.staho.dev](https://friends-q
 
 A correct answer scores 500 points, plus up to 500 more for an instant lock. A correct answer as the timer ends scores 500. A wrong answer or no answer scores 0. The formula is `scoreAnswer` in [`server/game.ts`](server/game.ts). Each answer is kept on the room, with the question category and difficulty, so a later picker can use how the table is doing.
 
-Questions live in the D1 database `friends-quiz`. Categories are their own table, so a picker can list them without scanning the bank. The schema and the starting pack are [`migrations/0001_questions.sql`](migrations/0001_questions.sql) and [`migrations/0002_seed.sql`](migrations/0002_seed.sql). `npm run dev` applies those migrations to the local database. A deploy creates the remote database if it is missing, applies the migrations, then publishes the Worker. Add a new migration to change the bank.
+Questions live in one Durable Object, in the tables from [`migrations/0001_questions.sql`](migrations/0001_questions.sql) and [`migrations/0002_seed.sql`](migrations/0002_seed.sql). Categories are their own table, so a picker can list them without scanning the bank. The object creates those tables the first time it starts. Add a new migration file only when the schema changes, and apply it from that object.
 
 ## Tests
 
