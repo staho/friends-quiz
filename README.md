@@ -1,23 +1,8 @@
 # Friends Quiz
 
-A local pub quiz for one TV and a phone per player. The TV shows the question and four answers. Each phone locks in one answer. The server keeps the timer and the scores.
+A pub quiz for one TV and a phone per player. The TV shows the question and four answers. Each phone locks in one answer. A Cloudflare Worker keeps the timer, the scores, and the question bank.
 
-## Run it
-
-```bash
-npm install
-npm run dev
-```
-
-Open the TV at [http://localhost:8787/host](http://localhost:8787/host). The screen shows a room code and a join address. Players open that address, enter the code and a name, then pick an answer.
-
-`npm run dev` builds the site and serves it with Wrangler. On your own Wi-Fi, open the network address Wrangler prints so phones can reach the TV's URL.
-
-Refresh the TV to get back to the same room. Use **New round** after the podium to keep the room code, clear scores, and deal a new set of questions.
-
-Pushes to `main` deploy the Worker to [friends-quiz.staho.dev](https://friends-quiz.staho.dev). Pull requests run the tests.
-
-## Round
+## How it plays
 
 1. Players join the lobby. The host presses **Start** once someone is in.
 2. A question stays open for 20 seconds. A player can change the selected answer until they press **Lock in** or the timer ends.
@@ -25,9 +10,54 @@ Pushes to `main` deploy the Worker to [friends-quiz.staho.dev](https://friends-q
 4. The host presses **Next** when the table is ready. **End** jumps to the podium.
 5. A round is 10 questions. The next one is chosen when the host starts or presses **Next**, from the questions still unused in that room.
 
-A correct answer scores 500 points, plus up to 500 more for an instant lock. A correct answer as the timer ends scores 500. A wrong answer or no answer scores 0. The formula is `scoreAnswer` in [`server/game.ts`](server/game.ts). Each answer is kept on the room, with the question category and difficulty, so a later picker can use how the table is doing.
+A correct answer scores 500 points, plus up to 500 more for an instant lock. A correct answer as the timer ends scores 500. A wrong answer or no answer scores 0. The formula is `scoreAnswer` in [`server/game.ts`](server/game.ts).
 
-Questions live in one Durable Object, in the tables from [`migrations/0001_questions.sql`](migrations/0001_questions.sql) and [`migrations/0002_seed.sql`](migrations/0002_seed.sql). Categories are their own table, so a picker can list them without scanning the bank. The object creates those tables the first time it starts. Add a new migration file only when the schema changes, and apply it from that object.
+Refresh the TV to get back to the same room. **New round** keeps the room code, clears scores, and deals a new set of questions.
+
+## Architecture
+
+- **Client.** React screens in [`client/src/screens/`](client/src/screens/). Vite builds them into `client/dist`. The Worker serves that folder as static assets.
+- **Worker.** [`worker/index.ts`](worker/index.ts) opens rooms and routes sockets. `POST /api/rooms` creates a room. `/ws/:code` is the game socket. Every other path is the site.
+- **Room.** One `RoomDurableObject` per room code. It runs the rules in [`server/game.ts`](server/game.ts), holds the live WebSockets, and sets an alarm for the question timer.
+- **Catalog.** One `CatalogDurableObject` holds the question bank and picks the next unused question.
+
+## Dependencies
+
+React 19, Vite, TypeScript, and Wrangler. Node 22 runs the tests.
+
+## Data
+
+SQLite lives inside the Durable Objects.
+
+The catalog object creates these tables on first start from [`migrations/0001_questions.sql`](migrations/0001_questions.sql), then loads [`migrations/0002_seed.sql`](migrations/0002_seed.sql):
+
+| Table | Stores |
+| --- | --- |
+| `categories` | id, label |
+| `questions` | prompt, category, difficulty (1–5), active |
+| `choices` | four answers per question, one marked correct |
+
+The room object keeps a single `room` row (`id` = 1, `data` = the live game as JSON): phase, players, scores, and answers. Both objects keep that data across deploys.
+
+## Connections
+
+Each browser opens one WebSocket to `/ws/CODE`. The server pushes `state`. The client sends the events in [`shared/wire.ts`](shared/wire.ts):
+
+- Host: `host:attach`, `host:start`, `host:next`, `host:end`, `host:reset`
+- Player: `player:join`, `player:attach`, `player:choose`, `player:lock`
+
+The TV creates the room with `POST /api/rooms` and stores the host token in `sessionStorage`. Phones store the player token the same way, so a refresh reattaches.
+
+## Deployment
+
+```bash
+npm install
+npm run dev
+```
+
+`npm run dev` builds the client and starts Wrangler. Open the TV at [http://localhost:8787/host](http://localhost:8787/host). On your own Wi-Fi, use the network address Wrangler prints so phones can join.
+
+`npm run deploy` publishes the Worker. A push to `main` does the same through GitHub Actions, with `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, to [friends-quiz.staho.dev](https://friends-quiz.staho.dev). Pull requests run the tests.
 
 ## Tests
 
