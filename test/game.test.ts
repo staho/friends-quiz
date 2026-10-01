@@ -193,6 +193,37 @@ describe("round flow", () => {
     assert.equal(room.phase, "finished")
     assert.equal(room.players[0]?.score, 0)
     assert.equal(room.history.length, 0)
+    assert.equal(room.pendingPlays.length, 0)
+  })
+
+  it("queues one play when a question is revealed and keeps it after reset", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = addPlayer(room, "p2", "Bea")
+    room = addPlayer(room, "p3", "Cam")
+    room = startGame(room, question("a", 0), 0, "round-1")
+    room = submitChoice(room, "p1", 0, 10)
+    room = lockAnswer(room, "p1", 10)
+    room = submitChoice(room, "p3", 1, 20)
+    room = applyTick(room, duration)
+    assert.equal(room.pendingPlays.length, 1)
+    assert.deepEqual(room.pendingPlays[0], {
+      playId: "QUIZ:round-1:a",
+      questionId: "a",
+      correct: 1,
+      incorrect: 1,
+    })
+    room = resetRound(room)
+    assert.equal(room.phase, "lobby")
+    assert.equal(room.roundId, null)
+    assert.equal(room.history.length, 0)
+    assert.deepEqual(room.pendingPlays, [
+      {
+        playId: "QUIZ:round-1:a",
+        questionId: "a",
+        correct: 1,
+        incorrect: 1,
+      },
+    ])
   })
 
   it("starts a fresh lobby on reset", () => {
@@ -253,5 +284,7 @@ describe("question policy", () => {
     assert.equal(room.asked[1]?.id, "b")
     assert.equal(room.history.length, 0)
     assert.equal(room.questionLimit, 2)
+    assert.equal(room.roundId, null)
+    assert.deepEqual(room.pendingPlays, [])
   })
 })

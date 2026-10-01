@@ -62,6 +62,13 @@ export interface PlayerAnswer {
   elapsedMs: number | null
 }
 
+export interface PendingPlay {
+  playId: string
+  questionId: string
+  correct: number
+  incorrect: number
+}
+
 export interface Room {
   code: string
   hostToken: string
@@ -75,6 +82,8 @@ export interface Room {
   questionDurationMs: number
   answers: Record<string, PlayerAnswer>
   reveal: PublicReveal | null
+  roundId: string | null
+  pendingPlays: PendingPlay[]
 }
 
 export interface Viewer {
@@ -142,6 +151,8 @@ export function createRoom(options: {
     questionDurationMs: options.questionDurationMs ?? QUESTION_DURATION_MS,
     answers: {},
     reveal: null,
+    roundId: null,
+    pendingPlays: [],
   }
 }
 
@@ -164,6 +175,8 @@ export function restoreRoom(raw: unknown): Room {
     questionDurationMs: value.questionDurationMs ?? QUESTION_DURATION_MS,
     answers: value.answers ?? {},
     reveal: value.reveal ?? null,
+    roundId: readRoundId(value.roundId),
+    pendingPlays: readPendingPlays(value.pendingPlays),
   }
 }
 
@@ -185,6 +198,39 @@ function readPhase(phase: Room["phase"] | undefined): Room["phase"] {
 
 function readLegacyQuestions(value: StoredRoom): Question[] | null {
   return Array.isArray(value.questions) ? value.questions : null
+}
+
+function readRoundId(value: string | null | undefined): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null
+}
+
+function readPendingPlays(value: unknown): PendingPlay[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    const play = readPendingPlay(item)
+    return play ? [play] : []
+  })
+}
+
+function readPendingPlay(item: unknown): PendingPlay | null {
+  if (!item || typeof item !== "object") return null
+  const play = item as Partial<PendingPlay>
+  if (!isPlayText(play.playId) || !isPlayText(play.questionId)) return null
+  if (!isPlayCount(play.correct) || !isPlayCount(play.incorrect)) return null
+  return {
+    playId: play.playId,
+    questionId: play.questionId,
+    correct: play.correct,
+    incorrect: play.incorrect,
+  }
+}
+
+function isPlayText(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0
+}
+
+function isPlayCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
 }
 
 function readAsked(value: StoredRoom, phase: Room["phase"], legacy: Question[] | null): Question[] {
@@ -237,7 +283,7 @@ export function setPlayerConnected(room: Room, playerId: string, connected: bool
   return replacePlayer(room, { ...player, connected })
 }
 
-export function startGame(room: Room, question: Question, now: number): Room {
+export function startGame(room: Room, question: Question, now: number, roundId: string = crypto.randomUUID()): Room {
   if (room.phase !== "lobby") throw new GameError("The round has already started")
   if (room.players.length === 0) throw new GameError("Wait for at least one player")
   return {
@@ -249,6 +295,7 @@ export function startGame(room: Room, question: Question, now: number): Room {
     questionStartedAt: now,
     answers: {},
     reveal: null,
+    roundId,
   }
 }
 
@@ -331,22 +378,26 @@ export function reveal(room: Room, now: number): Room {
     }
   })
 
-  return {
-    ...room,
-    phase: "reveal",
-    questionStartedAt: null,
-    history: [...room.history, ...history],
-    players: room.players.map((player) => {
-      const result = results.find((item) => item.playerId === player.id)
-      return result ? { ...player, score: result.score } : player
-    }),
-    reveal: {
-      correctIndex: question.correctIndex,
-      prompt: question.prompt,
-      choices: question.choices,
-      results,
+  return queueRevealedPlay(
+    {
+      ...room,
+      phase: "reveal",
+      questionStartedAt: null,
+      history: [...room.history, ...history],
+      players: room.players.map((player) => {
+        const result = results.find((item) => item.playerId === player.id)
+        return result ? { ...player, score: result.score } : player
+      }),
+      reveal: {
+        correctIndex: question.correctIndex,
+        prompt: question.prompt,
+        choices: question.choices,
+        results,
+      },
     },
-  }
+    question,
+    results,
+  )
 }
 
 export function nextQuestion(room: Room, question: Question | null, now: number): Room {
@@ -392,6 +443,7 @@ export function resetRound(room: Room): Room {
     questionStartedAt: null,
     answers: {},
     reveal: null,
+    roundId: null,
   }
 }
 
@@ -447,6 +499,22 @@ function playerView(room: Room, playerId: string): PlayerView {
     score: player.score,
     choiceIndex: answer?.choiceIndex ?? null,
     locked: answer?.locked === true,
+  }
+}
+
+function queueRevealedPlay(room: Room, question: Question, results: readonly RevealResult[]): Room {
+  const roundId = room.roundId ?? crypto.randomUUID()
+  const playId = `${room.code}:${roundId}:${question.id}`
+  const correct = results.filter((result) => result.correct).length
+  const incorrect = results.filter((result) => result.choiceIndex != null && !result.correct).length
+  if (room.pendingPlays.some((play) => play.playId === playId)) return { ...room, roundId }
+  return {
+    ...room,
+    roundId,
+    pendingPlays: [
+      ...room.pendingPlays,
+      { playId, questionId: question.id, correct, incorrect },
+    ],
   }
 }
 

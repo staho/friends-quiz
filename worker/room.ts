@@ -109,9 +109,7 @@ export class RoomDurableObject extends DurableObject<Env> {
       await this.arm(room)
       return
     }
-    this.writeRoom(next)
-    await this.arm(next)
-    this.broadcast(next, now)
+    await this.commit(next, now)
   }
 
   private async handle(ws: WebSocket, message: ClientMessage): Promise<unknown> {
@@ -259,9 +257,29 @@ export class RoomDurableObject extends DurableObject<Env> {
   }
 
   private async commit(room: Room, now: number): Promise<void> {
-    this.writeRoom(room)
-    await this.arm(room)
-    this.broadcast(room, now)
+    const flushed = await this.flushPlays(room)
+    this.writeRoom(flushed)
+    await this.arm(flushed)
+    this.broadcast(flushed, now)
+  }
+
+  private async flushPlays(room: Room): Promise<Room> {
+    if (room.pendingPlays.length === 0) return room
+    const accepted: string[] = []
+    try {
+      for (const play of room.pendingPlays) {
+        await this.env.CATALOG.getByName("questions").recordPlay(play)
+        accepted.push(play.playId)
+      }
+    } catch (error) {
+      console.error(error)
+    }
+    if (accepted.length === 0) return room
+    const acceptedIds = new Set(accepted)
+    return {
+      ...room,
+      pendingPlays: room.pendingPlays.filter((play) => !acceptedIds.has(play.playId)),
+    }
   }
 
   private async arm(room: Room): Promise<void> {
