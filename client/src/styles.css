@@ -318,6 +318,14 @@ button { touch-action: manipulation; }
   max-width: 100%;
 }
 
+.join input:focus {
+  outline: none;
+  border-color: #2d6bff;
+  box-shadow:
+    inset 0 0 0 2px #2d6bff,
+    0 4px 14px rgba(26, 18, 12, 0.05);
+}
+
 .join .btn, .lockbar .btn {
   width: 100%;
   min-width: 0;
