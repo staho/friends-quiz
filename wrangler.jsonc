@@ -16,9 +16,7 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "friends-quiz",
-      // Deploy replaces this local id with the remote database.
-      "database_id": "00000000-0000-0000-0000-000000000001"
+      "database_name": "friends-quiz"
     }
   ],
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomDurableObject"] }],
