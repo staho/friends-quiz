@@ -3,11 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "npm run build && wrangler dev",
+    "dev": "npm run db:migrate && npm run build && wrangler dev",
+    "db:migrate": "CI=true wrangler d1 migrations apply friends-quiz --local",
     "dev:client": "vite --config client/vite.config.ts",
     "build": "vite build --config client/vite.config.ts",
-    "deploy": "npm run build && wrangler deploy",
-    "test": "node --import tsx --test server/game.test.ts server/wire.test.ts",
+    "deploy": "npm run build && node scripts/ensure-d1.mjs && wrangler d1 migrations apply friends-quiz --remote && wrangler deploy",
+    "test": "node --import tsx --test test/*.test.ts",
     "types": "wrangler types"
   },
   "dependencies": {

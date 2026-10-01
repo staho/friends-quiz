@@ -2,6 +2,7 @@ import {
   BASE_POINTS,
   MAX_SPEED_BONUS,
   QUESTION_DURATION_MS,
+  QUESTIONS_PER_ROUND,
   type ChoiceIndex,
   type HostView,
   type PlayerView,
@@ -22,7 +23,30 @@ export interface Question {
   prompt: string
   choices: [string, string, string, string]
   correctIndex: ChoiceIndex
+  category: string
+  difficulty: number
 }
+
+export interface AnswerRecord {
+  playerId: string
+  questionId: string
+  category: string
+  difficulty: number
+  correct: boolean
+  elapsedMs: number
+}
+
+export interface RoundStats {
+  askedIds: string[]
+  answers: AnswerRecord[]
+  players: { id: string; score: number }[]
+}
+
+export type QuestionPolicy = (
+  candidates: readonly Question[],
+  stats: RoundStats,
+  rng?: () => number,
+) => Question
 
 export interface Player {
   id: string
@@ -42,7 +66,9 @@ export interface Room {
   code: string
   hostToken: string
   players: Player[]
-  questions: Question[]
+  asked: Question[]
+  history: AnswerRecord[]
+  questionLimit: number
   questionIndex: number
   phase: "lobby" | "question" | "reveal" | "finished"
   questionStartedAt: number | null
@@ -78,28 +104,38 @@ export function shuffle<T>(items: readonly T[], rng: () => number = Math.random)
   return copy
 }
 
-export function selectRound(
-  questions: readonly Question[],
-  count: number,
-  rng: () => number = Math.random,
-): Question[] {
-  if (questions.length === 0) throw new GameError("No questions available")
-  if (count < 1) throw new GameError("A round needs at least one question")
-  return shuffle(questions, rng).slice(0, Math.min(count, questions.length))
+export const randomQuestionPolicy: QuestionPolicy = (candidates, stats, rng = Math.random) => {
+  const asked = new Set(stats.askedIds)
+  const unseen = candidates.filter((question) => !asked.has(question.id))
+  if (unseen.length === 0) throw new GameError("No questions available")
+  const picked = shuffle(unseen, rng)[0]
+  if (!picked) throw new GameError("No questions available")
+  return picked
+}
+
+export function roundStats(room: Room): RoundStats {
+  return {
+    askedIds: room.asked.map((question) => question.id),
+    answers: room.history,
+    players: room.players.map((player) => ({ id: player.id, score: player.score })),
+  }
 }
 
 export function createRoom(options: {
   code: string
   hostToken: string
-  questions: Question[]
+  questionLimit?: number
   questionDurationMs?: number
 }): Room {
-  if (options.questions.length === 0) throw new GameError("No questions available")
+  const questionLimit = options.questionLimit ?? QUESTIONS_PER_ROUND
+  if (questionLimit < 1) throw new GameError("A round needs at least one question")
   return {
     code: options.code,
     hostToken: options.hostToken,
     players: [],
-    questions: options.questions,
+    asked: [],
+    history: [],
+    questionLimit,
     questionIndex: 0,
     phase: "lobby",
     questionStartedAt: null,
@@ -107,6 +143,54 @@ export function createRoom(options: {
     answers: {},
     reveal: null,
   }
+}
+
+type StoredRoom = Partial<Room> & { questions?: Question[] }
+
+export function restoreRoom(raw: unknown): Room {
+  const value = readStoredRoom(raw)
+  const phase = readPhase(value.phase)
+  const legacy = readLegacyQuestions(value)
+  return {
+    code: value.code,
+    hostToken: value.hostToken,
+    players: value.players ?? [],
+    asked: readAsked(value, phase, legacy),
+    history: value.history ?? [],
+    questionLimit: value.questionLimit ?? (legacy?.length || QUESTIONS_PER_ROUND),
+    questionIndex: value.questionIndex ?? 0,
+    phase,
+    questionStartedAt: value.questionStartedAt ?? null,
+    questionDurationMs: value.questionDurationMs ?? QUESTION_DURATION_MS,
+    answers: value.answers ?? {},
+    reveal: value.reveal ?? null,
+  }
+}
+
+function readStoredRoom(raw: unknown): StoredRoom & { code: string; hostToken: string } {
+  if (!raw || typeof raw !== "object") throw new GameError("Room not found")
+  const value = raw as StoredRoom
+  const code = value.code
+  const hostToken = value.hostToken
+  if (typeof code !== "string" || typeof hostToken !== "string") {
+    throw new GameError("Room not found")
+  }
+  return { ...value, code, hostToken }
+}
+
+function readPhase(phase: Room["phase"] | undefined): Room["phase"] {
+  if (phase === "question" || phase === "reveal" || phase === "finished") return phase
+  return "lobby"
+}
+
+function readLegacyQuestions(value: StoredRoom): Question[] | null {
+  return Array.isArray(value.questions) ? value.questions : null
+}
+
+function readAsked(value: StoredRoom, phase: Room["phase"], legacy: Question[] | null): Question[] {
+  if (Array.isArray(value.asked)) return value.asked
+  if (!legacy || phase === "lobby") return []
+  return legacy.slice(0, (value.questionIndex ?? 0) + 1)
 }
 
 export function joinPlayer(
@@ -153,13 +237,15 @@ export function setPlayerConnected(room: Room, playerId: string, connected: bool
   return replacePlayer(room, { ...player, connected })
 }
 
-export function startGame(room: Room, now: number): Room {
+export function startGame(room: Room, question: Question, now: number): Room {
   if (room.phase !== "lobby") throw new GameError("The round has already started")
   if (room.players.length === 0) throw new GameError("Wait for at least one player")
   return {
     ...room,
-    phase: "question",
+    asked: [question],
+    history: [],
     questionIndex: 0,
+    phase: "question",
     questionStartedAt: now,
     answers: {},
     reveal: null,
@@ -215,6 +301,7 @@ export function reveal(room: Room, now: number): Room {
     room.questionDurationMs,
     Math.max(0, now - room.questionStartedAt),
   )
+  const history: AnswerRecord[] = []
   const results: RevealResult[] = room.players.map((player) => {
     const answer = room.answers[player.id]
     const choiceIndex = answer?.choiceIndex ?? null
@@ -226,6 +313,14 @@ export function reveal(room: Room, now: number): Room {
           ? answer.elapsedMs
           : elapsedNow
     const points = answer ? scoreAnswer(correct, elapsedMs, room.questionDurationMs) : 0
+    history.push({
+      playerId: player.id,
+      questionId: question.id,
+      category: question.category,
+      difficulty: question.difficulty,
+      correct: answer != null && correct,
+      elapsedMs,
+    })
     return {
       playerId: player.id,
       name: player.name,
@@ -240,6 +335,7 @@ export function reveal(room: Room, now: number): Room {
     ...room,
     phase: "reveal",
     questionStartedAt: null,
+    history: [...room.history, ...history],
     players: room.players.map((player) => {
       const result = results.find((item) => item.playerId === player.id)
       return result ? { ...player, score: result.score } : player
@@ -253,10 +349,9 @@ export function reveal(room: Room, now: number): Room {
   }
 }
 
-export function nextQuestion(room: Room, now: number): Room {
+export function nextQuestion(room: Room, question: Question | null, now: number): Room {
   if (room.phase !== "reveal") throw new GameError("Reveal the answer before moving on")
-  const nextIndex = room.questionIndex + 1
-  if (nextIndex >= room.questions.length) {
+  if (question == null || room.asked.length >= room.questionLimit) {
     return {
       ...room,
       phase: "finished",
@@ -266,7 +361,8 @@ export function nextQuestion(room: Room, now: number): Room {
   }
   return {
     ...room,
-    questionIndex: nextIndex,
+    asked: [...room.asked, question],
+    questionIndex: room.asked.length,
     phase: "question",
     questionStartedAt: now,
     answers: {},
@@ -285,12 +381,12 @@ export function endGame(room: Room): Room {
   }
 }
 
-export function resetRound(room: Room, questions: Question[]): Room {
-  if (questions.length === 0) throw new GameError("No questions available")
+export function resetRound(room: Room): Room {
   return {
     ...room,
     players: room.players.map((player) => ({ ...player, score: 0 })),
-    questions,
+    asked: [],
+    history: [],
     questionIndex: 0,
     phase: "lobby",
     questionStartedAt: null,
@@ -322,7 +418,7 @@ export function snapshotFor(room: Room, viewer: Viewer, now: number, lanAddresse
           prompt: question.prompt,
           choices: question.choices,
           index: room.questionIndex,
-          total: room.questions.length,
+          total: room.questionLimit,
           durationMs: room.questionDurationMs,
           remainingMs: remainingMs(room, now),
         }
@@ -355,7 +451,7 @@ function playerView(room: Room, playerId: string): PlayerView {
 }
 
 function currentQuestion(room: Room): Question {
-  const question = room.questions[room.questionIndex]
+  const question = room.asked[room.questionIndex]
   if (!question) throw new GameError("No question is open")
   return question
 }

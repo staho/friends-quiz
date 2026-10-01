@@ -18,9 +18,8 @@
   "include": [
     "./**/*.ts",
     "../server/game.ts",
-    "../server/questions.ts",
+    "../server/catalog.ts",
     "../shared/**/*.ts",
-    "../worker-configuration.d.ts",
-    "../data/questions.json"
+    "../worker-configuration.d.ts"
   ]
 }
