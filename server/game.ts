@@ -204,23 +204,29 @@ function readRoundId(value: string | null | undefined): string | null {
   return typeof value === "string" && value.length > 0 ? value : null
 }
 
-function readPendingPlays(value: PendingPlay[] | undefined): PendingPlay[] {
+function readPendingPlays(value: unknown): PendingPlay[] {
   if (!Array.isArray(value)) return []
   return value.flatMap((item) => {
-    if (!item || typeof item !== "object") return []
-    const play = item as Partial<PendingPlay>
-    if (typeof play.playId !== "string" || play.playId.length === 0) return []
-    if (typeof play.questionId !== "string" || play.questionId.length === 0) return []
-    if (!isPlayCount(play.correct) || !isPlayCount(play.incorrect)) return []
-    return [
-      {
-        playId: play.playId,
-        questionId: play.questionId,
-        correct: play.correct,
-        incorrect: play.incorrect,
-      },
-    ]
+    const play = readPendingPlay(item)
+    return play ? [play] : []
   })
+}
+
+function readPendingPlay(item: unknown): PendingPlay | null {
+  if (!item || typeof item !== "object") return null
+  const play = item as Partial<PendingPlay>
+  if (!isPlayText(play.playId) || !isPlayText(play.questionId)) return null
+  if (!isPlayCount(play.correct) || !isPlayCount(play.incorrect)) return null
+  return {
+    playId: play.playId,
+    questionId: play.questionId,
+    correct: play.correct,
+    incorrect: play.incorrect,
+  }
+}
+
+function isPlayText(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0
 }
 
 function isPlayCount(value: unknown): value is number {
