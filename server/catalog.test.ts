@@ -5,13 +5,14 @@ import path from "node:path"
 import { describe, it } from "node:test"
 import { fileURLToPath } from "node:url"
 import { QUESTIONS_PER_ROUND } from "../shared/types.ts"
-import { listQuestions, questionsFromRows, type StatementDatabase } from "./catalog.ts"
+import { listCategories, listQuestions, pickRandomQuestion, questionsFromRows, type StatementDatabase } from "./catalog.ts"
 import { GameError } from "./game.ts"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 function openSeeded(): StatementDatabase {
   const db = new DatabaseSync(":memory:")
+  db.exec("PRAGMA foreign_keys = ON")
   db.exec(readFileSync(path.join(root, "migrations/0001_questions.sql"), "utf8"))
   db.exec(readFileSync(path.join(root, "migrations/0002_seed.sql"), "utf8"))
   return {
@@ -50,6 +51,29 @@ describe("question catalog", () => {
     const pack = await listQuestions(openSeeded(), { excludeIds: ["paris", "water"] })
     assert.equal(pack.some((item) => item.id === "paris"), false)
     assert.equal(pack.some((item) => item.id === "water"), false)
+  })
+
+  it("reads categories from their own table", async () => {
+    const categories = await listCategories(openSeeded())
+    assert.deepEqual(
+      categories.map((category) => category.id),
+      ["arts", "food", "general", "geography", "language", "math", "nature", "science", "sports"],
+    )
+    assert.equal(categories.find((category) => category.id === "geography")?.label, "Geography")
+  })
+
+  it("draws one unused question", async () => {
+    const db = openSeeded()
+    const pack = await listQuestions(db)
+    const keep = pack[0]
+    assert.ok(keep)
+    const picked = await pickRandomQuestion(
+      db,
+      pack.filter((item) => item.id !== keep.id).map((item) => item.id),
+    )
+    assert.equal(picked?.id, keep.id)
+    assert.deepEqual(picked?.choices, keep.choices)
+    assert.ok(await pickRandomQuestion(db))
   })
 
   it("filters by category", async () => {

@@ -1,3 +1,14 @@
+INSERT INTO categories (id, label) VALUES
+  ('arts', 'Arts'),
+  ('food', 'Food'),
+  ('general', 'General'),
+  ('geography', 'Geography'),
+  ('language', 'Language'),
+  ('math', 'Math'),
+  ('nature', 'Nature'),
+  ('science', 'Science'),
+  ('sports', 'Sports');
+
 INSERT INTO questions (id, prompt, category, difficulty, active) VALUES
   ('continents', 'How many continents are there?', 'geography', 1, 1),
   ('closest-planet', 'Which planet is closest to the Sun?', 'science', 1, 1),

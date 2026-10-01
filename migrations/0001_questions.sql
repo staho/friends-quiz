@@ -1,9 +1,15 @@
+CREATE TABLE categories (
+  id TEXT PRIMARY KEY,
+  label TEXT NOT NULL
+);
+
 CREATE TABLE questions (
   id TEXT PRIMARY KEY,
   prompt TEXT NOT NULL,
   category TEXT NOT NULL,
   difficulty INTEGER NOT NULL DEFAULT 1 CHECK (difficulty BETWEEN 1 AND 5),
-  active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
+  active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+  FOREIGN KEY (category) REFERENCES categories (id)
 );
 
 CREATE TABLE choices (

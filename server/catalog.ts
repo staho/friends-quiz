@@ -1,8 +1,14 @@
 import { GameError, type Question } from "./game.ts"
 import type { ChoiceIndex } from "../shared/types.ts"
 
+export interface Category {
+  id: string
+  label: string
+}
+
 export interface QuestionFilter {
   excludeIds?: readonly string[]
+  ids?: readonly string[]
   category?: string
   minDifficulty?: number
   maxDifficulty?: number
@@ -27,6 +33,32 @@ interface QuestionRow {
   is_correct: number
 }
 
+export async function listCategories(db: StatementDatabase): Promise<Category[]> {
+  const result = await db.prepare("SELECT id, label FROM categories ORDER BY label").all<Category>()
+  return result.results
+}
+
+export async function pickRandomQuestion(
+  db: StatementDatabase,
+  excludeIds: readonly string[] = [],
+): Promise<Question | null> {
+  const conditions = ["active = 1"]
+  const params: unknown[] = []
+  if (excludeIds.length > 0) {
+    conditions.push(`id NOT IN (${excludeIds.map(() => "?").join(", ")})`)
+    params.push(...excludeIds)
+  }
+  const statement = db.prepare(
+    `SELECT id FROM questions WHERE ${conditions.join(" AND ")} ORDER BY RANDOM() LIMIT 1`,
+  )
+  const picked =
+    params.length > 0 ? await statement.bind(...params).all<{ id: string }>() : await statement.all<{ id: string }>()
+  const id = picked.results[0]?.id
+  if (!id) return null
+  const questions = await listQuestions(db, { ids: [id] })
+  return questions[0] ?? null
+}
+
 export async function listQuestions(
   db: StatementDatabase,
   filter: QuestionFilter = {},
@@ -49,6 +81,11 @@ export async function listQuestions(
   if (exclude.length > 0) {
     conditions.push(`q.id NOT IN (${exclude.map(() => "?").join(", ")})`)
     params.push(...exclude)
+  }
+  const ids = filter.ids ?? []
+  if (ids.length > 0) {
+    conditions.push(`q.id IN (${ids.map(() => "?").join(", ")})`)
+    params.push(...ids)
   }
   const sql = `
     SELECT
