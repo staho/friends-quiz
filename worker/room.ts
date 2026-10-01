@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers"
-import questions from "../data/questions.json"
-import { QUESTIONS_PER_ROUND, type HostSession, type PlayerSession } from "../shared/types.ts"
+import { type HostSession, type PlayerSession } from "../shared/types.ts"
 import { parseClientMessage, type ClientMessage } from "../shared/wire.ts"
+import { listQuestions } from "../server/catalog.ts"
 import {
   GameError,
   applyTick,
@@ -10,18 +10,18 @@ import {
   joinPlayer,
   lockAnswer,
   nextQuestion,
+  randomQuestionPolicy,
   reconnectPlayer,
   resetRound,
-  selectRound,
+  restoreRoom,
+  roundStats,
   setPlayerConnected,
   snapshotFor,
   startGame,
   submitChoice,
+  type Question,
   type Room,
 } from "../server/game.ts"
-import { parseQuestions } from "../server/questions.ts"
-
-const pack = parseQuestions(questions)
 
 type Seat = { role: "host" } | { role: "player"; playerId: string }
 
@@ -43,7 +43,6 @@ export class RoomDurableObject extends DurableObject<Env> {
     const room = createRoom({
       code: input.code,
       hostToken: input.hostToken,
-      questions: selectRound(pack, QUESTIONS_PER_ROUND),
     })
     this.writeRoom(room)
     return { code: room.code, hostToken: room.hostToken }
@@ -123,11 +122,14 @@ export class RoomDurableObject extends DurableObject<Env> {
         return this.attachHost(ws, message.payload)
       case "host:start":
         this.requireHost(ws)
-        await this.mutate((room, now) => startGame(room, now))
+        await this.mutate(async (room, now) => startGame(room, await this.deal(room), now))
         return null
       case "host:next":
         this.requireHost(ws)
-        await this.mutate((room, now) => nextQuestion(room, now))
+        await this.mutate(async (room, now) => {
+          if (room.asked.length >= room.questionLimit) return nextQuestion(room, null, now)
+          return nextQuestion(room, await this.dealOrFinish(room), now)
+        })
         return null
       case "host:end":
         this.requireHost(ws)
@@ -135,7 +137,7 @@ export class RoomDurableObject extends DurableObject<Env> {
         return null
       case "host:reset":
         this.requireHost(ws)
-        await this.mutate((room) => resetRound(room, selectRound(pack, QUESTIONS_PER_ROUND)))
+        await this.mutate((room) => resetRound(room))
         return null
       case "player:join":
         return this.join(ws, message.payload)
@@ -222,14 +224,27 @@ export class RoomDurableObject extends DurableObject<Env> {
     return { code, playerId: player.id, token: player.token, name: player.name }
   }
 
-  private async mutate(run: (room: Room, now: number) => Room): Promise<void> {
+  private async deal(room: Room): Promise<Question> {
+    const question = await this.dealOrFinish(room)
+    if (!question) throw new GameError("No questions available")
+    return question
+  }
+
+  private async dealOrFinish(room: Room): Promise<Question | null> {
+    const stats = roundStats(room)
+    const candidates = await listQuestions(this.env.DB, { excludeIds: stats.askedIds })
+    if (candidates.length === 0) return null
+    return randomQuestionPolicy(candidates, stats)
+  }
+
+  private async mutate(run: (room: Room, now: number) => Room | Promise<Room>): Promise<void> {
     const room = this.readRoom()
     if (!room) throw new GameError("Room not found")
     const now = Date.now()
     const ticked = applyTick(room, now)
     let mutated: Room
     try {
-      mutated = run(ticked, now)
+      mutated = await run(ticked, now)
     } catch (error) {
       if (ticked !== room) await this.commit(ticked, now)
       throw error
@@ -282,7 +297,7 @@ export class RoomDurableObject extends DurableObject<Env> {
     const rows = this.ctx.storage.sql.exec<{ data: string }>("SELECT data FROM room WHERE id = 1").toArray()
     const row = rows[0]
     if (!row) return null
-    return JSON.parse(row.data) as Room
+    return restoreRoom(JSON.parse(row.data))
   }
 
   private writeRoom(room: Room): void {
