@@ -3,6 +3,7 @@ import {
   MAX_SPEED_BONUS,
   QUESTION_DURATION_MS,
   QUESTIONS_PER_ROUND,
+  REVEAL_HOLD_MS,
   type ChoiceIndex,
   type HostView,
   type PlayerView,
@@ -84,6 +85,9 @@ export interface Room {
   reveal: PublicReveal | null
   roundId: string | null
   pendingPlays: PendingPlay[]
+  advanceAt: number | null
+  advancePaused: boolean
+  advanceRemainingMs: number | null
 }
 
 export interface Viewer {
@@ -153,6 +157,7 @@ export function createRoom(options: {
     reveal: null,
     roundId: null,
     pendingPlays: [],
+    ...idleAdvance(),
   }
 }
 
@@ -177,6 +182,9 @@ export function restoreRoom(raw: unknown): Room {
     reveal: value.reveal ?? null,
     roundId: readRoundId(value.roundId),
     pendingPlays: readPendingPlays(value.pendingPlays),
+    advanceAt: readOptionalMs(value.advanceAt),
+    advancePaused: value.advancePaused === true,
+    advanceRemainingMs: readOptionalMs(value.advanceRemainingMs),
   }
 }
 
@@ -198,6 +206,26 @@ function readPhase(phase: Room["phase"] | undefined): Room["phase"] {
 
 function readLegacyQuestions(value: StoredRoom): Question[] | null {
   return Array.isArray(value.questions) ? value.questions : null
+}
+
+function idleAdvance(): Pick<Room, "advanceAt" | "advancePaused" | "advanceRemainingMs"> {
+  return { advanceAt: null, advancePaused: false, advanceRemainingMs: null }
+}
+
+function readOptionalMs(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null
+  return Math.max(0, value)
+}
+
+function holdLeft(room: Room, now: number): number {
+  if (room.advanceAt == null) return room.advanceRemainingMs ?? REVEAL_HOLD_MS
+  return Math.max(0, room.advanceAt - now)
+}
+
+function revealHoldLeft(room: Room, now: number): number | null {
+  if (room.advancePaused) return room.advanceRemainingMs ?? 0
+  if (room.advanceAt == null) return null
+  return Math.max(0, room.advanceAt - now)
 }
 
 function readRoundId(value: string | null | undefined): string | null {
@@ -296,6 +324,7 @@ export function startGame(room: Room, question: Question, now: number, roundId: 
     answers: {},
     reveal: null,
     roundId,
+    ...idleAdvance(),
   }
 }
 
@@ -394,10 +423,36 @@ export function reveal(room: Room, now: number): Room {
         choices: question.choices,
         results,
       },
+      advanceAt: now + REVEAL_HOLD_MS,
+      advancePaused: false,
+      advanceRemainingMs: null,
     },
     question,
     results,
   )
+}
+
+export function isAdvanceDue(room: Room, now: number): boolean {
+  return room.phase === "reveal" && !room.advancePaused && room.advanceAt != null && now >= room.advanceAt
+}
+
+export function toggleAdvancePause(room: Room, now: number): Room {
+  if (room.phase !== "reveal") throw new GameError("Nothing to pause")
+  if (!room.advancePaused) {
+    return {
+      ...room,
+      advancePaused: true,
+      advanceAt: null,
+      advanceRemainingMs: holdLeft(room, now),
+    }
+  }
+  const remaining = room.advanceRemainingMs ?? 0
+  return {
+    ...room,
+    advancePaused: false,
+    advanceAt: now + remaining,
+    advanceRemainingMs: null,
+  }
 }
 
 export function nextQuestion(room: Room, question: Question | null, now: number): Room {
@@ -408,6 +463,7 @@ export function nextQuestion(room: Room, question: Question | null, now: number)
       phase: "finished",
       questionStartedAt: null,
       answers: {},
+      ...idleAdvance(),
     }
   }
   return {
@@ -418,6 +474,7 @@ export function nextQuestion(room: Room, question: Question | null, now: number)
     questionStartedAt: now,
     answers: {},
     reveal: null,
+    ...idleAdvance(),
   }
 }
 
@@ -429,6 +486,7 @@ export function endGame(room: Room): Room {
     phase: "finished",
     questionStartedAt: null,
     answers: {},
+    ...idleAdvance(),
   }
 }
 
@@ -444,6 +502,7 @@ export function resetRound(room: Room): Room {
     answers: {},
     reveal: null,
     roundId: null,
+    ...idleAdvance(),
   }
 }
 
@@ -476,6 +535,8 @@ export function snapshotFor(room: Room, viewer: Viewer, now: number, lanAddresse
         }
       : null,
     reveal: room.phase === "reveal" || room.phase === "finished" ? room.reveal : null,
+    advanceRemainingMs: room.phase === "reveal" ? revealHoldLeft(room, now) : null,
+    advancePaused: room.phase === "reveal" && room.advancePaused,
     you,
     lanAddresses,
   }
