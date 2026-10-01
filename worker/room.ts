@@ -1,7 +1,6 @@
 import { DurableObject } from "cloudflare:workers"
 import { type HostSession, type PlayerSession } from "../shared/types.ts"
 import { parseClientMessage, type ClientMessage } from "../shared/wire.ts"
-import { pickRandomQuestion } from "../server/catalog.ts"
 import {
   GameError,
   applyTick,
@@ -230,7 +229,18 @@ export class RoomDurableObject extends DurableObject<Env> {
   }
 
   private async dealOrFinish(room: Room): Promise<Question | null> {
-    return pickRandomQuestion(this.env.DB, roundStats(room).askedIds)
+    const picked = await this.env.CATALOG.getByName("questions").pickRandom([...roundStats(room).askedIds])
+    if (!picked || picked.choices.length !== 4) return null
+    const [first, second, third, fourth] = picked.choices
+    if (first == null || second == null || third == null || fourth == null) return null
+    return {
+      id: picked.id,
+      prompt: picked.prompt,
+      choices: [first, second, third, fourth],
+      correctIndex: picked.correctIndex,
+      category: picked.category,
+      difficulty: picked.difficulty,
+    }
   }
 
   private async mutate(run: (room: Room, now: number) => Room | Promise<Room>): Promise<void> {

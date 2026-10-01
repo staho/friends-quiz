@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url"
 import { QUESTIONS_PER_ROUND } from "../shared/types.ts"
 import { listCategories, listQuestions, pickRandomQuestion, questionsFromRows, type StatementDatabase } from "../server/catalog.ts"
 import { GameError } from "../server/game.ts"
+import { sqlStatements } from "../server/sql-script.ts"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
@@ -51,6 +52,16 @@ describe("question catalog", () => {
     const pack = await listQuestions(openSeeded(), { excludeIds: ["paris", "water"] })
     assert.equal(pack.some((item) => item.id === "paris"), false)
     assert.equal(pack.some((item) => item.id === "water"), false)
+  })
+
+  it("applies the migrations one statement at a time", () => {
+    const db = new DatabaseSync(":memory:")
+    db.exec("PRAGMA foreign_keys = ON")
+    const schema = readFileSync(path.join(root, "migrations/0001_questions.sql"), "utf8")
+    const seed = readFileSync(path.join(root, "migrations/0002_seed.sql"), "utf8")
+    for (const statement of [...sqlStatements(schema), ...sqlStatements(seed)]) db.exec(statement)
+    const count = db.prepare("SELECT COUNT(*) AS n FROM categories").get() as { n: number }
+    assert.equal(count.n, 9)
   })
 
   it("reads categories from their own table", async () => {

@@ -17,6 +17,8 @@
   },
   "include": [
     "./**/*.ts",
+    "./**/*.d.ts",
+    "../server/sql-script.ts",
     "../server/game.ts",
     "../server/catalog.ts",
     "../shared/**/*.ts",
