@@ -1,5 +1,6 @@
 export const QUESTION_DURATION_MS = 20_000
 export const QUESTIONS_PER_ROUND = 10
+export const REVEAL_HOLD_MS = 10_000
 export const BASE_POINTS = 500
 export const MAX_SPEED_BONUS = 500
 
@@ -68,6 +69,8 @@ export interface RoomSnapshot {
   players: PublicPlayer[]
   question: PublicQuestion | null
   reveal: PublicReveal | null
+  advanceRemainingMs: number | null
+  advancePaused: boolean
   you: PlayerView | HostView
   lanAddresses: string[]
 }
@@ -94,6 +97,7 @@ export interface ClientToServerEvents {
   ) => void
   "host:start": (ack: (res: Ack<null>) => void) => void
   "host:next": (ack: (res: Ack<null>) => void) => void
+  "host:pause": (ack: (res: Ack<null>) => void) => void
   "host:end": (ack: (res: Ack<null>) => void) => void
   "host:reset": (ack: (res: Ack<null>) => void) => void
   "player:join": (

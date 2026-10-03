@@ -16,6 +16,13 @@ describe("client messages", () => {
     })
   })
 
+  it("accepts a pause with no payload", () => {
+    assert.deepEqual(parseClientMessage({ id: "1", event: "host:pause" }), {
+      id: "1",
+      event: "host:pause",
+    })
+  })
+
   it("accepts a lock with no payload", () => {
     assert.deepEqual(parseClientMessage({ id: "1", event: "player:lock" }), {
       id: "1",
