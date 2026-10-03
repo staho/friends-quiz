@@ -5,6 +5,7 @@ import {
   GameError,
   applyTick,
   createRoom,
+  difficultyForSlot,
   endGame,
   isAdvanceDue,
   joinPlayer,
@@ -239,7 +240,10 @@ export class RoomDurableObject extends DurableObject<Env> {
   }
 
   private async dealOrFinish(room: Room): Promise<Question | null> {
-    const picked = await this.env.CATALOG.getByName("questions").pickRandom([...roundStats(room).askedIds])
+    const picked = await this.env.CATALOG.getByName("questions").pickRandom(
+      [...roundStats(room).askedIds],
+      difficultyForSlot(room.asked.length),
+    )
     if (!picked || picked.choices.length !== 4) return null
     const [first, second, third, fourth] = picked.choices
     if (first == null || second == null || third == null || fourth == null) return null

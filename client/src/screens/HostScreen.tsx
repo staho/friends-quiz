@@ -198,7 +198,7 @@ function QuestionBoard({
   return (
     <section className="board">
       <p className="kicker">
-        Question {question.index + 1} of {question.total}
+        Question {question.index + 1} of {question.total} · Level {question.difficulty}
       </p>
       <h1 className="prompt">{question.prompt}</h1>
       <TimerBar leftMs={left} durationMs={question.durationMs} />

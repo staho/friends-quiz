@@ -31,6 +31,7 @@ export interface PublicQuestion {
   total: number
   durationMs: number
   remainingMs: number
+  difficulty: number
 }
 
 export interface RevealResult {

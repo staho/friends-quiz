@@ -28,8 +28,20 @@ function openMemory(): DatabaseSync {
   return db
 }
 
+const MIGRATION_NAMES = [
+  "0001_questions.sql",
+  "0002_seed.sql",
+  "0003_question_stats.sql",
+  "0004_categories.sql",
+  "0005_geography.sql",
+  "0006_science.sql",
+  "0007_common.sql",
+  "0008_movies.sql",
+  "0009_history.sql",
+]
+
 function migrationFiles(): CatalogMigration[] {
-  return ["0001_questions.sql", "0002_seed.sql", "0003_question_stats.sql"].map((name) => ({
+  return MIGRATION_NAMES.map((name) => ({
     name,
     sql: readFileSync(path.join(root, "migrations", name), "utf8"),
   }))
@@ -148,14 +160,16 @@ describe("question catalog", () => {
     assert.ok(pack.every((item) => item.category === "geography"))
   })
 
-  it("adds question stats to a catalog that is already seeded", () => {
+  it("applies later migrations once on a catalog that is already seeded", () => {
     const db = openMemory()
     db.exec(readFileSync(path.join(root, "migrations/0001_questions.sql"), "utf8"))
     db.exec(readFileSync(path.join(root, "migrations/0002_seed.sql"), "utf8"))
+    applyCatalogMigrations(asMigrationDatabase(db), migrationFiles())
     const categories = countRows(db, "categories")
     const questions = countRows(db, "questions")
     applyCatalogMigrations(asMigrationDatabase(db), migrationFiles())
-    applyCatalogMigrations(asMigrationDatabase(db), migrationFiles())
+    assert.equal(categories, 5)
+    assert.equal(questions, 112)
     assert.equal(countRows(db, "categories"), categories)
     assert.equal(countRows(db, "questions"), questions)
     assert.equal(countRows(db, "question_stats"), 0)
@@ -163,8 +177,38 @@ describe("question catalog", () => {
     const applied = db.prepare("SELECT name FROM schema_migrations ORDER BY name").all() as { name: string }[]
     assert.deepEqual(
       applied.map((row) => row.name),
-      ["0001_questions.sql", "0002_seed.sql", "0003_question_stats.sql"],
+      MIGRATION_NAMES,
     )
+  })
+
+  it("fills every category and difficulty with at least four questions", async () => {
+    const db = openMigrated()
+    const categories = await listCategories(db)
+    assert.deepEqual(
+      categories.map((category) => category.id),
+      ["common", "geography", "history", "movies", "science"],
+    )
+    const pack = await listQuestions(db)
+    assert.equal(pack.length, 112)
+    for (const category of categories) {
+      for (let difficulty = 1; difficulty <= 5; difficulty += 1) {
+        const cell = pack.filter((item) => item.category === category.id && item.difficulty === difficulty)
+        assert.ok(cell.length >= 4, `${category.id} level ${difficulty} has ${cell.length}`)
+      }
+    }
+  })
+
+  it("prefers the requested difficulty and falls back to the nearest level", async () => {
+    const db = openMigrated()
+    const levelFive = await listQuestions(db, { minDifficulty: 5, maxDifficulty: 5 })
+    const exact = await pickRandomQuestion(db, [], 5)
+    assert.equal(exact?.difficulty, 5)
+    const fallback = await pickRandomQuestion(
+      db,
+      levelFive.map((item) => item.id),
+      5,
+    )
+    assert.equal(fallback?.difficulty, 4)
   })
 
   it("counts a new play once and leaves an unanswered play off the answer totals", async () => {

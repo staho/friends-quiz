@@ -147,9 +147,41 @@ export async function listCategories(db: StatementDatabase): Promise<Category[]>
 export async function pickRandomQuestion(
   db: StatementDatabase,
   excludeIds: readonly string[] = [],
+  difficulty?: number,
 ): Promise<Question | null> {
+  const levels = difficulty == null ? [null] : difficultyOrder(difficulty)
+  for (const level of levels) {
+    const id = await pickQuestionId(db, excludeIds, level)
+    if (!id) continue
+    const questions = await listQuestions(db, { ids: [id] })
+    if (questions[0]) return questions[0]
+  }
+  return null
+}
+
+function difficultyOrder(target: number): number[] {
+  const level = Math.min(5, Math.max(1, Math.trunc(target)))
+  const order = [level]
+  for (let distance = 1; distance <= 4; distance += 1) {
+    const lower = level - distance
+    const higher = level + distance
+    if (lower >= 1) order.push(lower)
+    if (higher <= 5) order.push(higher)
+  }
+  return order
+}
+
+async function pickQuestionId(
+  db: StatementDatabase,
+  excludeIds: readonly string[],
+  difficulty: number | null,
+): Promise<string | null> {
   const conditions = ["active = 1"]
   const params: unknown[] = []
+  if (difficulty != null) {
+    conditions.push("difficulty = ?")
+    params.push(difficulty)
+  }
   if (excludeIds.length > 0) {
     conditions.push(`id NOT IN (${excludeIds.map(() => "?").join(", ")})`)
     params.push(...excludeIds)
@@ -159,10 +191,7 @@ export async function pickRandomQuestion(
   )
   const picked =
     params.length > 0 ? await statement.bind(...params).all<{ id: string }>() : await statement.all<{ id: string }>()
-  const id = picked.results[0]?.id
-  if (!id) return null
-  const questions = await listQuestions(db, { ids: [id] })
-  return questions[0] ?? null
+  return picked.results[0]?.id ?? null
 }
 
 export async function listQuestions(

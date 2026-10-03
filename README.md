@@ -23,11 +23,11 @@ Pushes to `main` deploy the Worker to [friends-quiz.staho.dev](https://friends-q
 2. A question stays open for 20 seconds. A player can change the selected answer until they press **Lock in** or the timer ends.
 3. The question reveals early when every connected player has locked in.
 4. The next question starts 10 seconds after the answer. **Pause** or the space bar holds that countdown. **Next** skips the wait. **End** jumps to the podium.
-5. A round is 10 questions. The next one is chosen when the host starts or the countdown ends, from the questions still unused in that room.
+5. A round is 10 questions, two from each difficulty level, played from warm-up to expert. The next one is chosen when the host starts or the countdown ends, from unused questions at that level.
 
 A correct answer scores 500 points, plus up to 500 more for an instant lock. A correct answer as the timer ends scores 500. A wrong answer or no answer scores 0. The formula is `scoreAnswer` in [`server/game.ts`](server/game.ts). Each answer is kept on the room, with the question category and difficulty, so a later picker can use how the table is doing.
 
-Questions live in one Durable Object, in the tables from [`migrations/0001_questions.sql`](migrations/0001_questions.sql) and [`migrations/0002_seed.sql`](migrations/0002_seed.sql). Categories are their own table, so a picker can list them without scanning the bank. The object creates those tables the first time it starts. Add a new migration file only when the schema changes, and apply it from that object.
+Questions live in one Durable Object. The tables start in [`migrations/0001_questions.sql`](migrations/0001_questions.sql) and [`migrations/0002_seed.sql`](migrations/0002_seed.sql). Later migration files add categories and questions. The object applies each file once. Categories are their own table, so a picker can list them without scanning the bank. [`data/COVERAGE.md`](data/COVERAGE.md) records how full each category and difficulty level is.
 
 ## Tests
 
