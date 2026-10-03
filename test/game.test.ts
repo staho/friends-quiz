@@ -54,7 +54,7 @@ function settings(overrides: Partial<RoomSettings> = {}): RoomSettings {
   return {
     questionDurationMs: duration,
     revealDurationMs: NEXT_TIME_DEFAULT_MS,
-    autoAdvance: false,
+    autoAdvance: true,
     difficulty: "mixed",
     ...overrides,
   }
@@ -179,15 +179,18 @@ describe("answers", () => {
 })
 
 describe("host settings", () => {
-  it("keeps a manual next and the mixed ramp by default", () => {
-    const room = roomWith()
-    assert.equal(room.autoAdvance, false)
+  it("advances automatically and keeps the mixed ramp by default", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    assert.equal(room.autoAdvance, true)
     assert.equal(room.difficulty, "mixed")
     assert.equal(room.revealDurationMs, NEXT_TIME_DEFAULT_MS)
     assert.equal(difficultyBounds(room.difficulty), null)
-    const snap = snapshotFor(room, { role: "host" }, 0, [])
-    assert.equal(snap.revealRemainingMs, null)
-    assert.equal(snap.settings.difficulty, "mixed")
+    room = startGame(room, question("a", 0), 0)
+    room = applyTick(room, duration)
+    assert.equal(room.advanceAt, duration + NEXT_TIME_DEFAULT_MS)
+    const snap = snapshotFor(room, { role: "host" }, duration, [])
+    assert.equal(snap.settings.autoAdvance, true)
+    assert.equal(snap.revealRemainingMs, NEXT_TIME_DEFAULT_MS)
   })
 
   it("rejects times outside the allowed seconds", () => {
@@ -223,7 +226,7 @@ describe("host settings", () => {
     const snap = snapshotFor(room, { role: "host" }, duration + 1_000, [])
     assert.equal(snap.revealRemainingMs, 7_000)
 
-    let manual = addPlayer(roomWith(), "p1", "Ada")
+    let manual = addPlayer(updateSettings(roomWith(), settings({ autoAdvance: false }), 0), "p1", "Ada")
     manual = startGame(manual, question("a", 0), 0)
     manual = applyTick(manual, duration)
     assert.equal(manual.advanceAt, null)
@@ -265,7 +268,8 @@ describe("host settings", () => {
     assert.deepEqual(difficultyBounds("4-5"), { minDifficulty: 4, maxDifficulty: 5 })
 
     const restored = restoreRoom({ code: "QUIZ", hostToken: "host" })
-    assert.equal(restored.autoAdvance, false)
+    assert.equal(restored.autoAdvance, true)
+    assert.equal(restoreRoom({ code: "QUIZ", hostToken: "host", autoAdvance: false }).autoAdvance, false)
     assert.equal(restored.difficulty, "mixed")
     assert.equal(restored.revealDurationMs, NEXT_TIME_DEFAULT_MS)
     assert.equal(restored.advanceAt, null)
