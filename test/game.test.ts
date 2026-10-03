@@ -5,6 +5,7 @@ import {
   GameError,
   applyTick,
   createRoom,
+  difficultyForSlot,
   endGame,
   joinPlayer,
   lockAnswer,
@@ -152,6 +153,7 @@ describe("answers", () => {
     const during = snapshotFor(room, { role: "player", playerId: "p1" }, 0, [])
     assert.equal(during.reveal, null)
     assert.equal(during.question?.prompt, "Prompt a")
+    assert.equal(during.question?.difficulty, 1)
     assert.equal("correctIndex" in (during.question ?? {}), false)
     room = submitChoice(room, "p1", 2, 10)
     room = lockAnswer(room, "p1", 10)
@@ -159,6 +161,15 @@ describe("answers", () => {
     const after = snapshotFor(room, { role: "player", playerId: "p1" }, 10, [])
     assert.equal(after.reveal?.correctIndex, 2)
     assert.equal(after.you.role === "player" ? after.you.choiceIndex : null, 2)
+  })
+})
+
+describe("difficulty ramp", () => {
+  it("asks for two questions at each level", () => {
+    assert.deepEqual(
+      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((asked) => difficultyForSlot(asked)),
+      [1, 1, 2, 2, 3, 3, 4, 4, 5, 5],
+    )
   })
 })
 
