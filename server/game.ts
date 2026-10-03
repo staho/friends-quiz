@@ -3,6 +3,7 @@ import {
   MAX_SPEED_BONUS,
   QUESTION_DURATION_MS,
   QUESTIONS_PER_ROUND,
+  REVEAL_HOLD_MS,
   type ChoiceIndex,
   type HostView,
   type PlayerView,
@@ -62,6 +63,13 @@ export interface PlayerAnswer {
   elapsedMs: number | null
 }
 
+export interface PendingPlay {
+  playId: string
+  questionId: string
+  correct: number
+  incorrect: number
+}
+
 export interface Room {
   code: string
   hostToken: string
@@ -75,6 +83,11 @@ export interface Room {
   questionDurationMs: number
   answers: Record<string, PlayerAnswer>
   reveal: PublicReveal | null
+  roundId: string | null
+  pendingPlays: PendingPlay[]
+  advanceAt: number | null
+  advancePaused: boolean
+  advanceRemainingMs: number | null
 }
 
 export interface Viewer {
@@ -89,6 +102,11 @@ export function scoreAnswer(correct: boolean, elapsedMs: number, durationMs: num
   const clamped = Math.min(Math.max(elapsedMs, 0), durationMs)
   const speedRatio = 1 - clamped / durationMs
   return BASE_POINTS + Math.round(speedRatio * MAX_SPEED_BONUS)
+}
+
+export function difficultyForSlot(askedCount: number): number {
+  if (askedCount < 0) return 1
+  return Math.min(5, Math.floor(askedCount / 2) + 1)
 }
 
 export function shuffle<T>(items: readonly T[], rng: () => number = Math.random): T[] {
@@ -142,6 +160,9 @@ export function createRoom(options: {
     questionDurationMs: options.questionDurationMs ?? QUESTION_DURATION_MS,
     answers: {},
     reveal: null,
+    roundId: null,
+    pendingPlays: [],
+    ...idleAdvance(),
   }
 }
 
@@ -164,6 +185,11 @@ export function restoreRoom(raw: unknown): Room {
     questionDurationMs: value.questionDurationMs ?? QUESTION_DURATION_MS,
     answers: value.answers ?? {},
     reveal: value.reveal ?? null,
+    roundId: readRoundId(value.roundId),
+    pendingPlays: readPendingPlays(value.pendingPlays),
+    advanceAt: readOptionalMs(value.advanceAt),
+    advancePaused: value.advancePaused === true,
+    advanceRemainingMs: readOptionalMs(value.advanceRemainingMs),
   }
 }
 
@@ -185,6 +211,59 @@ function readPhase(phase: Room["phase"] | undefined): Room["phase"] {
 
 function readLegacyQuestions(value: StoredRoom): Question[] | null {
   return Array.isArray(value.questions) ? value.questions : null
+}
+
+function idleAdvance(): Pick<Room, "advanceAt" | "advancePaused" | "advanceRemainingMs"> {
+  return { advanceAt: null, advancePaused: false, advanceRemainingMs: null }
+}
+
+function readOptionalMs(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null
+  return Math.max(0, value)
+}
+
+function holdLeft(room: Room, now: number): number {
+  if (room.advanceAt == null) return room.advanceRemainingMs ?? REVEAL_HOLD_MS
+  return Math.max(0, room.advanceAt - now)
+}
+
+function revealHoldLeft(room: Room, now: number): number | null {
+  if (room.advancePaused) return room.advanceRemainingMs ?? 0
+  if (room.advanceAt == null) return null
+  return Math.max(0, room.advanceAt - now)
+}
+
+function readRoundId(value: string | null | undefined): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null
+}
+
+function readPendingPlays(value: unknown): PendingPlay[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    const play = readPendingPlay(item)
+    return play ? [play] : []
+  })
+}
+
+function readPendingPlay(item: unknown): PendingPlay | null {
+  if (!item || typeof item !== "object") return null
+  const play = item as Partial<PendingPlay>
+  if (!isPlayText(play.playId) || !isPlayText(play.questionId)) return null
+  if (!isPlayCount(play.correct) || !isPlayCount(play.incorrect)) return null
+  return {
+    playId: play.playId,
+    questionId: play.questionId,
+    correct: play.correct,
+    incorrect: play.incorrect,
+  }
+}
+
+function isPlayText(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0
+}
+
+function isPlayCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
 }
 
 function readAsked(value: StoredRoom, phase: Room["phase"], legacy: Question[] | null): Question[] {
@@ -237,7 +316,7 @@ export function setPlayerConnected(room: Room, playerId: string, connected: bool
   return replacePlayer(room, { ...player, connected })
 }
 
-export function startGame(room: Room, question: Question, now: number): Room {
+export function startGame(room: Room, question: Question, now: number, roundId: string = crypto.randomUUID()): Room {
   if (room.phase !== "lobby") throw new GameError("The round has already started")
   if (room.players.length === 0) throw new GameError("Wait for at least one player")
   return {
@@ -249,6 +328,8 @@ export function startGame(room: Room, question: Question, now: number): Room {
     questionStartedAt: now,
     answers: {},
     reveal: null,
+    roundId,
+    ...idleAdvance(),
   }
 }
 
@@ -331,21 +412,51 @@ export function reveal(room: Room, now: number): Room {
     }
   })
 
+  return queueRevealedPlay(
+    {
+      ...room,
+      phase: "reveal",
+      questionStartedAt: null,
+      history: [...room.history, ...history],
+      players: room.players.map((player) => {
+        const result = results.find((item) => item.playerId === player.id)
+        return result ? { ...player, score: result.score } : player
+      }),
+      reveal: {
+        correctIndex: question.correctIndex,
+        prompt: question.prompt,
+        choices: question.choices,
+        results,
+      },
+      advanceAt: now + REVEAL_HOLD_MS,
+      advancePaused: false,
+      advanceRemainingMs: null,
+    },
+    question,
+    results,
+  )
+}
+
+export function isAdvanceDue(room: Room, now: number): boolean {
+  return room.phase === "reveal" && !room.advancePaused && room.advanceAt != null && now >= room.advanceAt
+}
+
+export function toggleAdvancePause(room: Room, now: number): Room {
+  if (room.phase !== "reveal") throw new GameError("Nothing to pause")
+  if (!room.advancePaused) {
+    return {
+      ...room,
+      advancePaused: true,
+      advanceAt: null,
+      advanceRemainingMs: holdLeft(room, now),
+    }
+  }
+  const remaining = room.advanceRemainingMs ?? 0
   return {
     ...room,
-    phase: "reveal",
-    questionStartedAt: null,
-    history: [...room.history, ...history],
-    players: room.players.map((player) => {
-      const result = results.find((item) => item.playerId === player.id)
-      return result ? { ...player, score: result.score } : player
-    }),
-    reveal: {
-      correctIndex: question.correctIndex,
-      prompt: question.prompt,
-      choices: question.choices,
-      results,
-    },
+    advancePaused: false,
+    advanceAt: now + remaining,
+    advanceRemainingMs: null,
   }
 }
 
@@ -357,6 +468,7 @@ export function nextQuestion(room: Room, question: Question | null, now: number)
       phase: "finished",
       questionStartedAt: null,
       answers: {},
+      ...idleAdvance(),
     }
   }
   return {
@@ -367,6 +479,7 @@ export function nextQuestion(room: Room, question: Question | null, now: number)
     questionStartedAt: now,
     answers: {},
     reveal: null,
+    ...idleAdvance(),
   }
 }
 
@@ -378,6 +491,7 @@ export function endGame(room: Room): Room {
     phase: "finished",
     questionStartedAt: null,
     answers: {},
+    ...idleAdvance(),
   }
 }
 
@@ -392,6 +506,8 @@ export function resetRound(room: Room): Room {
     questionStartedAt: null,
     answers: {},
     reveal: null,
+    roundId: null,
+    ...idleAdvance(),
   }
 }
 
@@ -421,9 +537,12 @@ export function snapshotFor(room: Room, viewer: Viewer, now: number, lanAddresse
           total: room.questionLimit,
           durationMs: room.questionDurationMs,
           remainingMs: remainingMs(room, now),
+          difficulty: question.difficulty,
         }
       : null,
     reveal: room.phase === "reveal" || room.phase === "finished" ? room.reveal : null,
+    advanceRemainingMs: room.phase === "reveal" ? revealHoldLeft(room, now) : null,
+    advancePaused: room.phase === "reveal" && room.advancePaused,
     you,
     lanAddresses,
   }
@@ -447,6 +566,22 @@ function playerView(room: Room, playerId: string): PlayerView {
     score: player.score,
     choiceIndex: answer?.choiceIndex ?? null,
     locked: answer?.locked === true,
+  }
+}
+
+function queueRevealedPlay(room: Room, question: Question, results: readonly RevealResult[]): Room {
+  const roundId = room.roundId ?? crypto.randomUUID()
+  const playId = `${room.code}:${roundId}:${question.id}`
+  const correct = results.filter((result) => result.correct).length
+  const incorrect = results.filter((result) => result.choiceIndex != null && !result.correct).length
+  if (room.pendingPlays.some((play) => play.playId === playId)) return { ...room, roundId }
+  return {
+    ...room,
+    roundId,
+    pendingPlays: [
+      ...room.pendingPlays,
+      { playId, questionId: question.id, correct, incorrect },
+    ],
   }
 }
 

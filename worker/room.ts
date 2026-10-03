@@ -5,7 +5,9 @@ import {
   GameError,
   applyTick,
   createRoom,
+  difficultyForSlot,
   endGame,
+  isAdvanceDue,
   joinPlayer,
   lockAnswer,
   nextQuestion,
@@ -17,6 +19,7 @@ import {
   snapshotFor,
   startGame,
   submitChoice,
+  toggleAdvancePause,
   type Question,
   type Room,
 } from "../server/game.ts"
@@ -104,14 +107,16 @@ export class RoomDurableObject extends DurableObject<Env> {
     const room = this.readRoom()
     if (!room) return
     const now = Date.now()
+    if (isAdvanceDue(room, now)) {
+      await this.commit(await this.advance(room, now), now)
+      return
+    }
     const next = applyTick(room, now)
     if (next === room) {
       await this.arm(room)
       return
     }
-    this.writeRoom(next)
-    await this.arm(next)
-    this.broadcast(next, now)
+    await this.commit(next, now)
   }
 
   private async handle(ws: WebSocket, message: ClientMessage): Promise<unknown> {
@@ -124,10 +129,11 @@ export class RoomDurableObject extends DurableObject<Env> {
         return null
       case "host:next":
         this.requireHost(ws)
-        await this.mutate(async (room, now) => {
-          if (room.asked.length >= room.questionLimit) return nextQuestion(room, null, now)
-          return nextQuestion(room, await this.dealOrFinish(room), now)
-        })
+        await this.mutate((room, now) => this.advance(room, now))
+        return null
+      case "host:pause":
+        this.requireHost(ws)
+        await this.mutate((room, now) => toggleAdvancePause(room, now))
         return null
       case "host:end":
         this.requireHost(ws)
@@ -222,6 +228,11 @@ export class RoomDurableObject extends DurableObject<Env> {
     return { code, playerId: player.id, token: player.token, name: player.name }
   }
 
+  private async advance(room: Room, now: number): Promise<Room> {
+    if (room.asked.length >= room.questionLimit) return nextQuestion(room, null, now)
+    return nextQuestion(room, await this.dealOrFinish(room), now)
+  }
+
   private async deal(room: Room): Promise<Question> {
     const question = await this.dealOrFinish(room)
     if (!question) throw new GameError("No questions available")
@@ -229,7 +240,10 @@ export class RoomDurableObject extends DurableObject<Env> {
   }
 
   private async dealOrFinish(room: Room): Promise<Question | null> {
-    const picked = await this.env.CATALOG.getByName("questions").pickRandom([...roundStats(room).askedIds])
+    const picked = await this.env.CATALOG.getByName("questions").pickRandom(
+      [...roundStats(room).askedIds],
+      difficultyForSlot(room.asked.length),
+    )
     if (!picked || picked.choices.length !== 4) return null
     const [first, second, third, fourth] = picked.choices
     if (first == null || second == null || third == null || fourth == null) return null
@@ -259,17 +273,37 @@ export class RoomDurableObject extends DurableObject<Env> {
   }
 
   private async commit(room: Room, now: number): Promise<void> {
-    this.writeRoom(room)
-    await this.arm(room)
-    this.broadcast(room, now)
+    const flushed = await this.flushPlays(room)
+    this.writeRoom(flushed)
+    await this.arm(flushed)
+    this.broadcast(flushed, now)
+  }
+
+  private async flushPlays(room: Room): Promise<Room> {
+    if (room.pendingPlays.length === 0) return room
+    const accepted: string[] = []
+    try {
+      for (const play of room.pendingPlays) {
+        await this.env.CATALOG.getByName("questions").recordPlay(play)
+        accepted.push(play.playId)
+      }
+    } catch (error) {
+      console.error(error)
+    }
+    if (accepted.length === 0) return room
+    const acceptedIds = new Set(accepted)
+    return {
+      ...room,
+      pendingPlays: room.pendingPlays.filter((play) => !acceptedIds.has(play.playId)),
+    }
   }
 
   private async arm(room: Room): Promise<void> {
-    if (room.phase !== "question" || room.questionStartedAt == null) {
+    const deadline = alarmAt(room)
+    if (deadline == null) {
       await this.ctx.storage.deleteAlarm()
       return
     }
-    const deadline = room.questionStartedAt + room.questionDurationMs
     const existing = await this.ctx.storage.getAlarm()
     if (existing !== deadline) await this.ctx.storage.setAlarm(deadline)
   }
@@ -312,6 +346,14 @@ export class RoomDurableObject extends DurableObject<Env> {
       JSON.stringify(room),
     )
   }
+}
+
+function alarmAt(room: Room): number | null {
+  if (room.phase === "question" && room.questionStartedAt != null) {
+    return room.questionStartedAt + room.questionDurationMs
+  }
+  if (room.phase === "reveal" && !room.advancePaused && room.advanceAt != null) return room.advanceAt
+  return null
 }
 
 function readSeat(ws: WebSocket): Seat | null {

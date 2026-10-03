@@ -1,11 +1,13 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { BASE_POINTS, MAX_SPEED_BONUS } from "../shared/types.ts"
+import { BASE_POINTS, MAX_SPEED_BONUS, REVEAL_HOLD_MS } from "../shared/types.ts"
 import {
   GameError,
   applyTick,
   createRoom,
+  difficultyForSlot,
   endGame,
+  isAdvanceDue,
   joinPlayer,
   lockAnswer,
   nextQuestion,
@@ -16,6 +18,7 @@ import {
   snapshotFor,
   startGame,
   submitChoice,
+  toggleAdvancePause,
   type Question,
   type Room,
 } from "../server/game.ts"
@@ -152,6 +155,7 @@ describe("answers", () => {
     const during = snapshotFor(room, { role: "player", playerId: "p1" }, 0, [])
     assert.equal(during.reveal, null)
     assert.equal(during.question?.prompt, "Prompt a")
+    assert.equal(during.question?.difficulty, 1)
     assert.equal("correctIndex" in (during.question ?? {}), false)
     room = submitChoice(room, "p1", 2, 10)
     room = lockAnswer(room, "p1", 10)
@@ -159,6 +163,15 @@ describe("answers", () => {
     const after = snapshotFor(room, { role: "player", playerId: "p1" }, 10, [])
     assert.equal(after.reveal?.correctIndex, 2)
     assert.equal(after.you.role === "player" ? after.you.choiceIndex : null, 2)
+  })
+})
+
+describe("difficulty ramp", () => {
+  it("asks for two questions at each level", () => {
+    assert.deepEqual(
+      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((asked) => difficultyForSlot(asked)),
+      [1, 1, 2, 2, 3, 3, 4, 4, 5, 5],
+    )
   })
 })
 
@@ -193,6 +206,37 @@ describe("round flow", () => {
     assert.equal(room.phase, "finished")
     assert.equal(room.players[0]?.score, 0)
     assert.equal(room.history.length, 0)
+    assert.equal(room.pendingPlays.length, 0)
+  })
+
+  it("queues one play when a question is revealed and keeps it after reset", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = addPlayer(room, "p2", "Bea")
+    room = addPlayer(room, "p3", "Cam")
+    room = startGame(room, question("a", 0), 0, "round-1")
+    room = submitChoice(room, "p1", 0, 10)
+    room = lockAnswer(room, "p1", 10)
+    room = submitChoice(room, "p3", 1, 20)
+    room = applyTick(room, duration)
+    assert.equal(room.pendingPlays.length, 1)
+    assert.deepEqual(room.pendingPlays[0], {
+      playId: "QUIZ:round-1:a",
+      questionId: "a",
+      correct: 1,
+      incorrect: 1,
+    })
+    room = resetRound(room)
+    assert.equal(room.phase, "lobby")
+    assert.equal(room.roundId, null)
+    assert.equal(room.history.length, 0)
+    assert.deepEqual(room.pendingPlays, [
+      {
+        playId: "QUIZ:round-1:a",
+        questionId: "a",
+        correct: 1,
+        incorrect: 1,
+      },
+    ])
   })
 
   it("starts a fresh lobby on reset", () => {
@@ -205,6 +249,66 @@ describe("round flow", () => {
     assert.equal(room.asked.length, 0)
     assert.equal(room.history.length, 0)
     assert.equal(room.reveal, null)
+  })
+
+  it("moves on 10 seconds after the answer unless the host pauses", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = startGame(room, question("a", 0), 0)
+    room = applyTick(room, duration)
+    assert.equal(room.phase, "reveal")
+    assert.equal(room.advanceAt, duration + REVEAL_HOLD_MS)
+    assert.equal(room.advancePaused, false)
+    assert.equal(isAdvanceDue(room, duration + REVEAL_HOLD_MS - 1), false)
+    assert.equal(isAdvanceDue(room, duration + REVEAL_HOLD_MS), true)
+
+    const playing = snapshotFor(room, { role: "host" }, duration + 2_000, [])
+    assert.equal(playing.advanceRemainingMs, REVEAL_HOLD_MS - 2_000)
+    assert.equal(playing.advancePaused, false)
+
+    room = toggleAdvancePause(room, duration + 3_000)
+    assert.equal(room.advancePaused, true)
+    assert.equal(room.advanceAt, null)
+    assert.equal(room.advanceRemainingMs, REVEAL_HOLD_MS - 3_000)
+    assert.equal(isAdvanceDue(room, duration + REVEAL_HOLD_MS), false)
+    const held = snapshotFor(room, { role: "host" }, duration + 9_000, [])
+    assert.equal(held.advanceRemainingMs, REVEAL_HOLD_MS - 3_000)
+    assert.equal(held.advancePaused, true)
+
+    room = toggleAdvancePause(room, duration + 9_000)
+    assert.equal(room.advancePaused, false)
+    assert.equal(room.advanceAt, duration + 9_000 + (REVEAL_HOLD_MS - 3_000))
+    assert.equal(room.advanceRemainingMs, null)
+
+    room = nextQuestion(room, question("b", 1), room.advanceAt ?? 0)
+    assert.equal(room.phase, "question")
+    assert.equal(room.advanceAt, null)
+    assert.equal(room.advancePaused, false)
+    assert.equal(room.advanceRemainingMs, null)
+  })
+
+  it("leaves an older reveal in place until the host moves on", () => {
+    const room = restoreRoom({
+      code: "QUIZ",
+      hostToken: "host",
+      phase: "reveal",
+      questionIndex: 0,
+      asked: [question("a", 0)],
+      reveal: {
+        correctIndex: 0,
+        prompt: "Prompt a",
+        choices: ["Red", "Blue", "Gold", "Green"],
+        results: [],
+      },
+    })
+    assert.equal(room.advanceAt, null)
+    assert.equal(room.advancePaused, false)
+    assert.equal(isAdvanceDue(room, 60_000), false)
+    assert.equal(snapshotFor(room, { role: "host" }, 60_000, []).advanceRemainingMs, null)
+  })
+
+  it("refuses to pause before the answer is showing", () => {
+    const room = addPlayer(roomWith(), "p1", "Ada")
+    assert.throws(() => toggleAdvancePause(startGame(room, question("a", 0), 0), 1), GameError)
   })
 
   it("finishes when the round already has its question limit", () => {
@@ -253,5 +357,7 @@ describe("question policy", () => {
     assert.equal(room.asked[1]?.id, "b")
     assert.equal(room.history.length, 0)
     assert.equal(room.questionLimit, 2)
+    assert.equal(room.roundId, null)
+    assert.deepEqual(room.pendingPlays, [])
   })
 })

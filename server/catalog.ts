@@ -1,5 +1,8 @@
-import { GameError, type Question } from "./game.ts"
 import type { ChoiceIndex } from "../shared/types.ts"
+import { GameError, type Question } from "./game.ts"
+import { sqlStatements } from "./sql-script.ts"
+
+const BASELINE_MIGRATIONS = ["0001_questions.sql", "0002_seed.sql"]
 
 export interface Category {
   id: string
@@ -14,13 +17,57 @@ export interface QuestionFilter {
   maxDifficulty?: number
 }
 
+export interface Statement {
+  bind(...values: unknown[]): Statement
+  all<T = Record<string, unknown>>(): Promise<{ results: T[] }>
+  run(): Promise<{ changes: number }>
+}
+
 export interface StatementDatabase {
-  prepare(query: string): {
-    bind(...values: unknown[]): {
-      all<T = Record<string, unknown>>(): Promise<{ results: T[] }>
-    }
-    all<T = Record<string, unknown>>(): Promise<{ results: T[] }>
-  }
+  prepare(query: string): Statement
+}
+
+export interface MigrationDatabase {
+  exec(query: string): void
+  all<T>(query: string, ...values: unknown[]): T[]
+  run(query: string, ...values: unknown[]): void
+}
+
+export interface CatalogMigration {
+  name: string
+  sql: string
+}
+
+export interface QuestionPlay {
+  playId: string
+  questionId: string
+  correct: number
+  incorrect: number
+}
+
+export interface QuestionStat {
+  questionId: string
+  timesAsked: number
+  correctCount: number
+  incorrectCount: number
+}
+
+interface QuestionStatRow {
+  question_id: string
+  times_asked: number
+  correct_count: number
+  incorrect_count: number
+}
+
+function readPlayText(value: string, label: string): string {
+  const text = value.trim()
+  if (!text) throw new GameError(`Missing ${label}`)
+  return text
+}
+
+function readPlayCount(value: number, label: string): number {
+  if (!Number.isInteger(value) || value < 0) throw new GameError(`Invalid ${label}`)
+  return value
 }
 
 interface QuestionRow {
@@ -33,6 +80,65 @@ interface QuestionRow {
   is_correct: number
 }
 
+export function applyCatalogMigrations(db: MigrationDatabase, migrations: readonly CatalogMigration[]): void {
+  db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY)")
+  const hasCategories =
+    db.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'categories'").length > 0
+  const applied = new Set(db.all<{ name: string }>("SELECT name FROM schema_migrations").map((row) => row.name))
+  if (hasCategories && applied.size === 0) {
+    for (const name of BASELINE_MIGRATIONS) {
+      db.run("INSERT INTO schema_migrations (name) VALUES (?)", name)
+      applied.add(name)
+    }
+  }
+  for (const migration of migrations) {
+    if (applied.has(migration.name)) continue
+    for (const statement of sqlStatements(migration.sql)) db.exec(statement)
+    db.run("INSERT INTO schema_migrations (name) VALUES (?)", migration.name)
+    applied.add(migration.name)
+  }
+}
+
+export async function recordQuestionPlay(db: StatementDatabase, play: QuestionPlay): Promise<boolean> {
+  const playId = readPlayText(play.playId, "play")
+  const questionId = readPlayText(play.questionId, "question")
+  const correct = readPlayCount(play.correct, "correct count")
+  const incorrect = readPlayCount(play.incorrect, "incorrect count")
+  const inserted = await db
+    .prepare("INSERT INTO question_plays (play_id, question_id) VALUES (?, ?) ON CONFLICT(play_id) DO NOTHING")
+    .bind(playId, questionId)
+    .run()
+  if (inserted.changes === 0) return false
+  await db
+    .prepare(
+      `INSERT INTO question_stats (question_id, times_asked, correct_count, incorrect_count)
+       VALUES (?, 1, ?, ?)
+       ON CONFLICT(question_id) DO UPDATE SET
+         times_asked = times_asked + 1,
+         correct_count = correct_count + excluded.correct_count,
+         incorrect_count = incorrect_count + excluded.incorrect_count`,
+    )
+    .bind(questionId, correct, incorrect)
+    .run()
+  return true
+}
+
+export async function listQuestionStats(db: StatementDatabase): Promise<QuestionStat[]> {
+  const result = await db
+    .prepare(
+      `SELECT question_id, times_asked, correct_count, incorrect_count
+       FROM question_stats
+       ORDER BY question_id`,
+    )
+    .all<QuestionStatRow>()
+  return result.results.map((row) => ({
+    questionId: row.question_id,
+    timesAsked: Number(row.times_asked),
+    correctCount: Number(row.correct_count),
+    incorrectCount: Number(row.incorrect_count),
+  }))
+}
+
 export async function listCategories(db: StatementDatabase): Promise<Category[]> {
   const result = await db.prepare("SELECT id, label FROM categories ORDER BY label").all<Category>()
   return result.results
@@ -41,9 +147,41 @@ export async function listCategories(db: StatementDatabase): Promise<Category[]>
 export async function pickRandomQuestion(
   db: StatementDatabase,
   excludeIds: readonly string[] = [],
+  difficulty?: number,
 ): Promise<Question | null> {
+  const levels = difficulty == null ? [null] : difficultyOrder(difficulty)
+  for (const level of levels) {
+    const id = await pickQuestionId(db, excludeIds, level)
+    if (!id) continue
+    const questions = await listQuestions(db, { ids: [id] })
+    if (questions[0]) return questions[0]
+  }
+  return null
+}
+
+function difficultyOrder(target: number): number[] {
+  const level = Math.min(5, Math.max(1, Math.trunc(target)))
+  const order = [level]
+  for (let distance = 1; distance <= 4; distance += 1) {
+    const lower = level - distance
+    const higher = level + distance
+    if (lower >= 1) order.push(lower)
+    if (higher <= 5) order.push(higher)
+  }
+  return order
+}
+
+async function pickQuestionId(
+  db: StatementDatabase,
+  excludeIds: readonly string[],
+  difficulty: number | null,
+): Promise<string | null> {
   const conditions = ["active = 1"]
   const params: unknown[] = []
+  if (difficulty != null) {
+    conditions.push("difficulty = ?")
+    params.push(difficulty)
+  }
   if (excludeIds.length > 0) {
     conditions.push(`id NOT IN (${excludeIds.map(() => "?").join(", ")})`)
     params.push(...excludeIds)
@@ -53,10 +191,7 @@ export async function pickRandomQuestion(
   )
   const picked =
     params.length > 0 ? await statement.bind(...params).all<{ id: string }>() : await statement.all<{ id: string }>()
-  const id = picked.results[0]?.id
-  if (!id) return null
-  const questions = await listQuestions(db, { ids: [id] })
-  return questions[0] ?? null
+  return picked.results[0]?.id ?? null
 }
 
 export async function listQuestions(
