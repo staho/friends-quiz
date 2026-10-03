@@ -144,12 +144,18 @@ export async function listCategories(db: StatementDatabase): Promise<Category[]>
   return result.results
 }
 
+export interface DifficultyBounds {
+  minDifficulty: number
+  maxDifficulty: number
+}
+
 export async function pickRandomQuestion(
   db: StatementDatabase,
   excludeIds: readonly string[] = [],
   difficulty?: number,
+  bounds?: DifficultyBounds,
 ): Promise<Question | null> {
-  const levels = difficulty == null ? [null] : difficultyOrder(difficulty)
+  const levels = levelsToTry(difficulty, bounds)
   for (const level of levels) {
     const id = await pickQuestionId(db, excludeIds, level)
     if (!id) continue
@@ -157,6 +163,15 @@ export async function pickRandomQuestion(
     if (questions[0]) return questions[0]
   }
   return null
+}
+
+function levelsToTry(difficulty: number | undefined, bounds?: DifficultyBounds): Array<number | null> {
+  if (!bounds) return difficulty == null ? [null] : difficultyOrder(difficulty)
+  const min = Math.trunc(bounds.minDifficulty)
+  const max = Math.trunc(bounds.maxDifficulty)
+  if (min > max) return []
+  const target = difficulty == null ? min : Math.min(max, Math.max(min, Math.trunc(difficulty)))
+  return difficultyOrder(target).filter((level) => level >= min && level <= max)
 }
 
 function difficultyOrder(target: number): number[] {

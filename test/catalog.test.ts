@@ -198,6 +198,20 @@ describe("question catalog", () => {
     }
   })
 
+  it("stays inside a difficulty band", async () => {
+    const db = openMigrated()
+    const pack = await listQuestions(db)
+    const bounds = { minDifficulty: 4, maxDifficulty: 5 }
+    const picked = await pickRandomQuestion(db, [], 5, bounds)
+    assert.ok(picked)
+    assert.ok(picked.difficulty >= 4 && picked.difficulty <= 5)
+    const levelFive = pack.filter((item) => item.difficulty === 5).map((item) => item.id)
+    const inside = await pickRandomQuestion(db, levelFive, 5, bounds)
+    assert.equal(inside?.difficulty, 4)
+    const blocked = pack.filter((item) => item.difficulty >= 4).map((item) => item.id)
+    assert.equal(await pickRandomQuestion(db, blocked, 5, bounds), null)
+  })
+
   it("prefers the requested difficulty and falls back to the nearest level", async () => {
     const db = openMigrated()
     const levelFive = await listQuestions(db, { minDifficulty: 5, maxDifficulty: 5 })

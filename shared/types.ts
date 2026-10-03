@@ -1,8 +1,15 @@
 export const QUESTION_DURATION_MS = 20_000
 export const QUESTIONS_PER_ROUND = 10
-export const REVEAL_HOLD_MS = 10_000
 export const BASE_POINTS = 500
 export const MAX_SPEED_BONUS = 500
+export const ANSWER_TIME_MIN_MS = 5_000
+export const ANSWER_TIME_MAX_MS = 120_000
+export const NEXT_TIME_MIN_MS = 2_000
+export const NEXT_TIME_MAX_MS = 30_000
+export const NEXT_TIME_DEFAULT_MS = 8_000
+
+export const DIFFICULTY_BANDS = ["mixed", "1-2", "2-4", "4-5"] as const
+export type DifficultyBand = (typeof DIFFICULTY_BANDS)[number]
 
 export const CHOICES = [
   { key: "A", color: "#e23b3b", ink: "#fff8f4" },
@@ -63,16 +70,24 @@ export interface HostView {
   role: "host"
 }
 
+export interface RoomSettings {
+  questionDurationMs: number
+  revealDurationMs: number
+  autoAdvance: boolean
+  difficulty: DifficultyBand
+}
+
 export interface RoomSnapshot {
   code: string
   phase: Phase
   players: PublicPlayer[]
   question: PublicQuestion | null
   reveal: PublicReveal | null
-  advanceRemainingMs: number | null
-  advancePaused: boolean
   you: PlayerView | HostView
   lanAddresses: string[]
+  settings: RoomSettings
+  revealRemainingMs: number | null
+  advancePaused: boolean
 }
 
 export interface HostSession {
@@ -100,6 +115,7 @@ export interface ClientToServerEvents {
   "host:pause": (ack: (res: Ack<null>) => void) => void
   "host:end": (ack: (res: Ack<null>) => void) => void
   "host:reset": (ack: (res: Ack<null>) => void) => void
+  "host:settings": (payload: RoomSettings, ack: (res: Ack<null>) => void) => void
   "player:join": (
     payload: { code: string; name: string },
     ack: (res: Ack<PlayerSession>) => void,

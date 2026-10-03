@@ -1,14 +1,20 @@
 import {
+  ANSWER_TIME_MAX_MS,
+  ANSWER_TIME_MIN_MS,
   BASE_POINTS,
   MAX_SPEED_BONUS,
+  NEXT_TIME_DEFAULT_MS,
+  NEXT_TIME_MAX_MS,
+  NEXT_TIME_MIN_MS,
   QUESTION_DURATION_MS,
   QUESTIONS_PER_ROUND,
-  REVEAL_HOLD_MS,
   type ChoiceIndex,
+  type DifficultyBand,
   type HostView,
   type PlayerView,
   type PublicReveal,
   type RevealResult,
+  type RoomSettings,
   type RoomSnapshot,
 } from "../shared/types.ts"
 
@@ -81,13 +87,16 @@ export interface Room {
   phase: "lobby" | "question" | "reveal" | "finished"
   questionStartedAt: number | null
   questionDurationMs: number
+  revealDurationMs: number
+  autoAdvance: boolean
+  difficulty: DifficultyBand
+  advanceAt: number | null
+  advancePaused: boolean
+  advanceRemainingMs: number | null
   answers: Record<string, PlayerAnswer>
   reveal: PublicReveal | null
   roundId: string | null
   pendingPlays: PendingPlay[]
-  advanceAt: number | null
-  advancePaused: boolean
-  advanceRemainingMs: number | null
 }
 
 export interface Viewer {
@@ -158,11 +167,16 @@ export function createRoom(options: {
     phase: "lobby",
     questionStartedAt: null,
     questionDurationMs: options.questionDurationMs ?? QUESTION_DURATION_MS,
+    revealDurationMs: NEXT_TIME_DEFAULT_MS,
+    autoAdvance: true,
+    difficulty: "mixed",
+    advanceAt: null,
+    advancePaused: false,
+    advanceRemainingMs: null,
     answers: {},
     reveal: null,
     roundId: null,
     pendingPlays: [],
-    ...idleAdvance(),
   }
 }
 
@@ -183,13 +197,14 @@ export function restoreRoom(raw: unknown): Room {
     phase,
     questionStartedAt: value.questionStartedAt ?? null,
     questionDurationMs: value.questionDurationMs ?? QUESTION_DURATION_MS,
+    revealDurationMs: readRevealDuration(value.revealDurationMs),
+    autoAdvance: value.autoAdvance !== false,
+    difficulty: readDifficultyBand(value.difficulty),
+    ...readAdvance(value),
     answers: value.answers ?? {},
     reveal: value.reveal ?? null,
     roundId: readRoundId(value.roundId),
     pendingPlays: readPendingPlays(value.pendingPlays),
-    advanceAt: readOptionalMs(value.advanceAt),
-    advancePaused: value.advancePaused === true,
-    advanceRemainingMs: readOptionalMs(value.advanceRemainingMs),
   }
 }
 
@@ -211,26 +226,6 @@ function readPhase(phase: Room["phase"] | undefined): Room["phase"] {
 
 function readLegacyQuestions(value: StoredRoom): Question[] | null {
   return Array.isArray(value.questions) ? value.questions : null
-}
-
-function idleAdvance(): Pick<Room, "advanceAt" | "advancePaused" | "advanceRemainingMs"> {
-  return { advanceAt: null, advancePaused: false, advanceRemainingMs: null }
-}
-
-function readOptionalMs(value: number | null | undefined): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null
-  return Math.max(0, value)
-}
-
-function holdLeft(room: Room, now: number): number {
-  if (room.advanceAt == null) return room.advanceRemainingMs ?? REVEAL_HOLD_MS
-  return Math.max(0, room.advanceAt - now)
-}
-
-function revealHoldLeft(room: Room, now: number): number | null {
-  if (room.advancePaused) return room.advanceRemainingMs ?? 0
-  if (room.advanceAt == null) return null
-  return Math.max(0, room.advanceAt - now)
 }
 
 function readRoundId(value: string | null | undefined): string | null {
@@ -264,6 +259,23 @@ function isPlayText(value: unknown): value is string {
 
 function isPlayCount(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0
+}
+
+function readRevealDuration(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < NEXT_TIME_MIN_MS || value > NEXT_TIME_MAX_MS) {
+    return NEXT_TIME_DEFAULT_MS
+  }
+  return value
+}
+
+function readDifficultyBand(value: DifficultyBand | undefined): DifficultyBand {
+  if (value === "1-2" || value === "2-4" || value === "4-5") return value
+  return "mixed"
+}
+
+function readAdvanceAt(autoAdvance: boolean, value: number | null | undefined): number | null {
+  if (!autoAdvance || typeof value !== "number" || !Number.isFinite(value)) return null
+  return value
 }
 
 function readAsked(value: StoredRoom, phase: Room["phase"], legacy: Question[] | null): Question[] {
@@ -329,7 +341,6 @@ export function startGame(room: Room, question: Question, now: number, roundId: 
     answers: {},
     reveal: null,
     roundId,
-    ...idleAdvance(),
   }
 }
 
@@ -361,6 +372,82 @@ export function lockAnswer(room: Room, playerId: string, now: number): Room {
       [playerId]: { ...current, locked: true, elapsedMs: elapsed(room, now) },
     },
   }
+}
+
+export function updateSettings(room: Room, input: RoomSettings, now: number): Room {
+  const questionDurationMs = readSettingDuration(
+    input.questionDurationMs,
+    ANSWER_TIME_MIN_MS,
+    ANSWER_TIME_MAX_MS,
+    "Answer time",
+  )
+  const revealDurationMs = readSettingDuration(
+    input.revealDurationMs,
+    NEXT_TIME_MIN_MS,
+    NEXT_TIME_MAX_MS,
+    "Time to the next question",
+  )
+  if (typeof input.autoAdvance !== "boolean") throw new GameError("Choose whether to advance automatically")
+  const difficulty = requireDifficultyBand(input.difficulty)
+  const next: Room = {
+    ...room,
+    questionDurationMs,
+    revealDurationMs,
+    autoAdvance: input.autoAdvance,
+    difficulty,
+  }
+  if (room.phase !== "reveal") return next
+  const timingChanged = room.autoAdvance !== next.autoAdvance || room.revealDurationMs !== next.revealDurationMs
+  if (!timingChanged) return next
+  return {
+    ...next,
+    ...stoppedAdvance(),
+    advanceAt: next.autoAdvance ? now + next.revealDurationMs : null,
+  }
+}
+
+export function toggleAdvancePause(room: Room, now: number): Room {
+  if (room.phase !== "reveal" || !room.autoAdvance) throw new GameError("Nothing to pause")
+  if (!room.advancePaused) {
+    return {
+      ...room,
+      advancePaused: true,
+      advanceAt: null,
+      advanceRemainingMs: holdLeft(room, now),
+    }
+  }
+  const remaining = room.advanceRemainingMs ?? 0
+  return {
+    ...room,
+    advancePaused: false,
+    advanceAt: now + remaining,
+    advanceRemainingMs: null,
+  }
+}
+
+export function advanceDue(room: Room, now: number): boolean {
+  return (
+    room.phase === "reveal" &&
+    room.autoAdvance &&
+    !room.advancePaused &&
+    room.advanceAt != null &&
+    now >= room.advanceAt
+  )
+}
+
+export function alarmAt(room: Room): number | null {
+  if (room.phase === "question" && room.questionStartedAt != null) {
+    return room.questionStartedAt + room.questionDurationMs
+  }
+  if (room.phase === "reveal" && room.autoAdvance && room.advanceAt != null) return room.advanceAt
+  return null
+}
+
+export function difficultyBounds(band: DifficultyBand): { minDifficulty: number; maxDifficulty: number } | null {
+  if (band === "1-2") return { minDifficulty: 1, maxDifficulty: 2 }
+  if (band === "2-4") return { minDifficulty: 2, maxDifficulty: 4 }
+  if (band === "4-5") return { minDifficulty: 4, maxDifficulty: 5 }
+  return null
 }
 
 export function applyTick(room: Room, now: number): Room {
@@ -417,6 +504,8 @@ export function reveal(room: Room, now: number): Room {
       ...room,
       phase: "reveal",
       questionStartedAt: null,
+      ...stoppedAdvance(),
+      advanceAt: room.autoAdvance ? now + room.revealDurationMs : null,
       history: [...room.history, ...history],
       players: room.players.map((player) => {
         const result = results.find((item) => item.playerId === player.id)
@@ -428,36 +517,10 @@ export function reveal(room: Room, now: number): Room {
         choices: question.choices,
         results,
       },
-      advanceAt: now + REVEAL_HOLD_MS,
-      advancePaused: false,
-      advanceRemainingMs: null,
     },
     question,
     results,
   )
-}
-
-export function isAdvanceDue(room: Room, now: number): boolean {
-  return room.phase === "reveal" && !room.advancePaused && room.advanceAt != null && now >= room.advanceAt
-}
-
-export function toggleAdvancePause(room: Room, now: number): Room {
-  if (room.phase !== "reveal") throw new GameError("Nothing to pause")
-  if (!room.advancePaused) {
-    return {
-      ...room,
-      advancePaused: true,
-      advanceAt: null,
-      advanceRemainingMs: holdLeft(room, now),
-    }
-  }
-  const remaining = room.advanceRemainingMs ?? 0
-  return {
-    ...room,
-    advancePaused: false,
-    advanceAt: now + remaining,
-    advanceRemainingMs: null,
-  }
 }
 
 export function nextQuestion(room: Room, question: Question | null, now: number): Room {
@@ -467,8 +530,8 @@ export function nextQuestion(room: Room, question: Question | null, now: number)
       ...room,
       phase: "finished",
       questionStartedAt: null,
+      ...stoppedAdvance(),
       answers: {},
-      ...idleAdvance(),
     }
   }
   return {
@@ -477,9 +540,9 @@ export function nextQuestion(room: Room, question: Question | null, now: number)
     questionIndex: room.asked.length,
     phase: "question",
     questionStartedAt: now,
+    ...stoppedAdvance(),
     answers: {},
     reveal: null,
-    ...idleAdvance(),
   }
 }
 
@@ -490,8 +553,8 @@ export function endGame(room: Room): Room {
     ...room,
     phase: "finished",
     questionStartedAt: null,
+    ...stoppedAdvance(),
     answers: {},
-    ...idleAdvance(),
   }
 }
 
@@ -504,10 +567,10 @@ export function resetRound(room: Room): Room {
     questionIndex: 0,
     phase: "lobby",
     questionStartedAt: null,
+    ...stoppedAdvance(),
     answers: {},
     reveal: null,
     roundId: null,
-    ...idleAdvance(),
   }
 }
 
@@ -541,10 +604,11 @@ export function snapshotFor(room: Room, viewer: Viewer, now: number, lanAddresse
         }
       : null,
     reveal: room.phase === "reveal" || room.phase === "finished" ? room.reveal : null,
-    advanceRemainingMs: room.phase === "reveal" ? revealHoldLeft(room, now) : null,
-    advancePaused: room.phase === "reveal" && room.advancePaused,
     you,
     lanAddresses,
+    settings: roomSettings(room),
+    revealRemainingMs: revealWaitMs(room, now),
+    advancePaused: room.phase === "reveal" && room.advancePaused,
   }
 }
 
@@ -589,6 +653,60 @@ function currentQuestion(room: Room): Question {
   const question = room.asked[room.questionIndex]
   if (!question) throw new GameError("No question is open")
   return question
+}
+
+function roomSettings(room: Room): RoomSettings {
+  return {
+    questionDurationMs: room.questionDurationMs,
+    revealDurationMs: room.revealDurationMs,
+    autoAdvance: room.autoAdvance,
+    difficulty: room.difficulty,
+  }
+}
+
+function stoppedAdvance(): Pick<Room, "advanceAt" | "advancePaused" | "advanceRemainingMs"> {
+  return { advanceAt: null, advancePaused: false, advanceRemainingMs: null }
+}
+
+function readAdvance(value: StoredRoom): Pick<Room, "advanceAt" | "advancePaused" | "advanceRemainingMs"> {
+  const autoAdvance = value.autoAdvance !== false
+  const advancePaused = autoAdvance && value.advancePaused === true
+  if (!advancePaused) return { ...stoppedAdvance(), advanceAt: readAdvanceAt(autoAdvance, value.advanceAt) }
+  return {
+    advancePaused: true,
+    advanceAt: null,
+    advanceRemainingMs: readOptionalMs(value.advanceRemainingMs) ?? 0,
+  }
+}
+
+function readOptionalMs(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null
+  return Math.max(0, value)
+}
+
+function holdLeft(room: Room, now: number): number {
+  if (room.advancePaused) return room.advanceRemainingMs ?? 0
+  if (room.advanceAt == null) return 0
+  return Math.max(0, room.advanceAt - now)
+}
+
+function revealWaitMs(room: Room, now: number): number | null {
+  if (room.phase !== "reveal" || !room.autoAdvance) return null
+  if (room.advancePaused) return room.advanceRemainingMs ?? 0
+  if (room.advanceAt == null) return null
+  return Math.max(0, room.advanceAt - now)
+}
+
+function readSettingDuration(value: number, min: number, max: number, label: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) {
+    throw new GameError(`${label} needs to be between ${min / 1000} and ${max / 1000} seconds`)
+  }
+  return value
+}
+
+function requireDifficultyBand(value: unknown): DifficultyBand {
+  if (value === "mixed" || value === "1-2" || value === "2-4" || value === "4-5") return value
+  throw new GameError("Pick a difficulty")
 }
 
 function remainingMs(room: Room, now: number): number {

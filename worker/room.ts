@@ -3,11 +3,13 @@ import { type HostSession, type PlayerSession } from "../shared/types.ts"
 import { parseClientMessage, type ClientMessage } from "../shared/wire.ts"
 import {
   GameError,
+  advanceDue,
+  alarmAt,
   applyTick,
   createRoom,
+  difficultyBounds,
   difficultyForSlot,
   endGame,
-  isAdvanceDue,
   joinPlayer,
   lockAnswer,
   nextQuestion,
@@ -20,6 +22,7 @@ import {
   startGame,
   submitChoice,
   toggleAdvancePause,
+  updateSettings,
   type Question,
   type Room,
 } from "../server/game.ts"
@@ -107,11 +110,11 @@ export class RoomDurableObject extends DurableObject<Env> {
     const room = this.readRoom()
     if (!room) return
     const now = Date.now()
-    if (isAdvanceDue(room, now)) {
-      await this.commit(await this.advance(room, now), now)
-      return
+    let next = applyTick(room, now)
+    if (advanceDue(next, now)) {
+      const question = next.asked.length >= next.questionLimit ? null : await this.dealOrFinish(next)
+      next = applyTick(nextQuestion(next, question, now), now)
     }
-    const next = applyTick(room, now)
     if (next === room) {
       await this.arm(room)
       return
@@ -129,7 +132,10 @@ export class RoomDurableObject extends DurableObject<Env> {
         return null
       case "host:next":
         this.requireHost(ws)
-        await this.mutate((room, now) => this.advance(room, now))
+        await this.mutate(async (room, now) => {
+          if (room.asked.length >= room.questionLimit) return nextQuestion(room, null, now)
+          return nextQuestion(room, await this.dealOrFinish(room), now)
+        })
         return null
       case "host:pause":
         this.requireHost(ws)
@@ -142,6 +148,10 @@ export class RoomDurableObject extends DurableObject<Env> {
       case "host:reset":
         this.requireHost(ws)
         await this.mutate((room) => resetRound(room))
+        return null
+      case "host:settings":
+        this.requireHost(ws)
+        await this.mutate((room, now) => updateSettings(room, message.payload, now))
         return null
       case "player:join":
         return this.join(ws, message.payload)
@@ -228,11 +238,6 @@ export class RoomDurableObject extends DurableObject<Env> {
     return { code, playerId: player.id, token: player.token, name: player.name }
   }
 
-  private async advance(room: Room, now: number): Promise<Room> {
-    if (room.asked.length >= room.questionLimit) return nextQuestion(room, null, now)
-    return nextQuestion(room, await this.dealOrFinish(room), now)
-  }
-
   private async deal(room: Room): Promise<Question> {
     const question = await this.dealOrFinish(room)
     if (!question) throw new GameError("No questions available")
@@ -240,9 +245,13 @@ export class RoomDurableObject extends DurableObject<Env> {
   }
 
   private async dealOrFinish(room: Room): Promise<Question | null> {
+    const bounds = difficultyBounds(room.difficulty)
+    const slot = difficultyForSlot(room.asked.length)
+    const target = bounds ? Math.min(bounds.maxDifficulty, Math.max(bounds.minDifficulty, slot)) : slot
     const picked = await this.env.CATALOG.getByName("questions").pickRandom(
       [...roundStats(room).askedIds],
-      difficultyForSlot(room.asked.length),
+      target,
+      bounds ?? undefined,
     )
     if (!picked || picked.choices.length !== 4) return null
     const [first, second, third, fourth] = picked.choices
@@ -346,14 +355,6 @@ export class RoomDurableObject extends DurableObject<Env> {
       JSON.stringify(room),
     )
   }
-}
-
-function alarmAt(room: Room): number | null {
-  if (room.phase === "question" && room.questionStartedAt != null) {
-    return room.questionStartedAt + room.questionDurationMs
-  }
-  if (room.phase === "reveal" && !room.advancePaused && room.advanceAt != null) return room.advanceAt
-  return null
 }
 
 function readSeat(ws: WebSocket): Seat | null {

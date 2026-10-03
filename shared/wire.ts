@@ -1,3 +1,5 @@
+import { DIFFICULTY_BANDS, type DifficultyBand, type RoomSettings } from "./types.ts"
+
 export type ClientMessage =
   | { id: string; event: "host:attach"; payload: { code: string; hostToken: string } }
   | { id: string; event: "host:start" }
@@ -5,6 +7,7 @@ export type ClientMessage =
   | { id: string; event: "host:pause" }
   | { id: string; event: "host:end" }
   | { id: string; event: "host:reset" }
+  | { id: string; event: "host:settings"; payload: RoomSettings }
   | { id: string; event: "player:join"; payload: { code: string; name: string } }
   | { id: string; event: "player:attach"; payload: { code: string; playerId: string; token: string } }
   | { id: string; event: "player:choose"; payload: { choiceIndex: number } }
@@ -54,9 +57,30 @@ export function parseClientMessage(value: unknown): ClientMessage | null {
       if (!isRecord(payload) || typeof payload.choiceIndex !== "number") return null
       return { id, event: "player:choose", payload: { choiceIndex: payload.choiceIndex } }
     }
+    case "host:settings": {
+      const payload = readSettings(value.payload)
+      if (!payload) return null
+      return { id, event: "host:settings", payload }
+    }
     default:
       return null
   }
+}
+
+function readSettings(payload: unknown): RoomSettings | null {
+  if (!isRecord(payload)) return null
+  if (typeof payload.questionDurationMs !== "number" || typeof payload.revealDurationMs !== "number") return null
+  if (typeof payload.autoAdvance !== "boolean" || !isDifficultyBand(payload.difficulty)) return null
+  return {
+    questionDurationMs: payload.questionDurationMs,
+    revealDurationMs: payload.revealDurationMs,
+    autoAdvance: payload.autoAdvance,
+    difficulty: payload.difficulty,
+  }
+}
+
+function isDifficultyBand(value: unknown): value is DifficultyBand {
+  return typeof value === "string" && DIFFICULTY_BANDS.some((band) => band === value)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
