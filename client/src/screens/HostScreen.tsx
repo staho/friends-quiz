@@ -1,5 +1,16 @@
 import { useEffect, useState } from "react"
-import type { HostSession, PublicPlayer, RoomSnapshot } from "@shared/types"
+import {
+  ANSWER_TIME_MAX_MS,
+  ANSWER_TIME_MIN_MS,
+  DIFFICULTY_BANDS,
+  NEXT_TIME_MAX_MS,
+  NEXT_TIME_MIN_MS,
+  type DifficultyBand,
+  type HostSession,
+  type PublicPlayer,
+  type RoomSettings,
+  type RoomSnapshot,
+} from "@shared/types"
 import { AnswerGrid, TimerBar, formatCode, joinOrigin } from "../components"
 import { request, socket } from "../socket"
 import { useCountdown } from "../useCountdown"
@@ -56,6 +67,7 @@ export function HostScreen() {
           onNext={() => run(() => request((ack) => socket.emit("host:next", ack)))}
           onEnd={() => run(() => request((ack) => socket.emit("host:end", ack)))}
           onReset={() => run(() => request((ack) => socket.emit("host:reset", ack)))}
+          onSettings={(settings) => run(() => request((ack) => socket.emit("host:settings", settings, ack)))}
         />
       )}
     </main>
@@ -69,6 +81,7 @@ function HostBody({
   onNext,
   onEnd,
   onReset,
+  onSettings,
 }: {
   snapshot: RoomSnapshot
   busy: boolean
@@ -76,6 +89,7 @@ function HostBody({
   onNext: () => void
   onEnd: () => void
   onReset: () => void
+  onSettings: (settings: RoomSettings) => void
 }) {
   if (snapshot.phase === "lobby") {
     const origin = joinOrigin(snapshot.lanAddresses)
@@ -87,6 +101,7 @@ function HostBody({
           {formatCode(snapshot.code)}
         </p>
         <PlayerStrip players={snapshot.players} />
+        <RoundSettings snapshot={snapshot} busy={busy} onSettings={onSettings} open />
         <div className="controls">
           <button type="button" className="btn primary" disabled={busy || snapshot.players.length === 0} onClick={onStart}>
             Start
@@ -97,27 +112,12 @@ function HostBody({
   }
 
   if (snapshot.phase === "question" && snapshot.question) {
-    return (
-      <QuestionBoard snapshot={snapshot} busy={busy} onEnd={onEnd} />
-    )
+    return <QuestionBoard snapshot={snapshot} busy={busy} onEnd={onEnd} onSettings={onSettings} />
   }
 
   if (snapshot.phase === "reveal" && snapshot.reveal) {
     return (
-      <section className="board">
-        <p className="kicker">The answer</p>
-        <h1 className="prompt">{snapshot.reveal.prompt}</h1>
-        <AnswerGrid choices={snapshot.reveal.choices} selected={null} correctIndex={snapshot.reveal.correctIndex} />
-        <ScoreList snapshot={snapshot} />
-        <div className="controls">
-          <button type="button" className="btn primary" disabled={busy} onClick={onNext}>
-            Next
-          </button>
-          <button type="button" className="btn ghost" disabled={busy} onClick={onEnd}>
-            End
-          </button>
-        </div>
-      </section>
+      <RevealBoard snapshot={snapshot} busy={busy} onNext={onNext} onEnd={onEnd} onSettings={onSettings} />
     )
   }
 
@@ -130,6 +130,45 @@ function HostBody({
           New round
         </button>
       </div>
+      <RoundSettings snapshot={snapshot} busy={busy} onSettings={onSettings} />
+    </section>
+  )
+}
+
+function RevealBoard({
+  snapshot,
+  busy,
+  onNext,
+  onEnd,
+  onSettings,
+}: {
+  snapshot: RoomSnapshot
+  busy: boolean
+  onNext: () => void
+  onEnd: () => void
+  onSettings: (settings: RoomSettings) => void
+}) {
+  const reveal = snapshot.reveal
+  const left = useCountdown(snapshot.revealRemainingMs, snapshot.settings.autoAdvance)
+  if (!reveal) return null
+  return (
+    <section className="board">
+      <p className="kicker">The answer</p>
+      <h1 className="prompt">{reveal.prompt}</h1>
+      <AnswerGrid choices={reveal.choices} selected={null} correctIndex={reveal.correctIndex} />
+      <ScoreList snapshot={snapshot} />
+      {snapshot.settings.autoAdvance && snapshot.revealRemainingMs != null && (
+        <p className="hint">{left <= 0 ? "Next question now" : `Next question in ${Math.ceil(left / 1000)}s`}</p>
+      )}
+      <div className="controls">
+        <button type="button" className="btn primary" disabled={busy} onClick={onNext}>
+          Next
+        </button>
+        <button type="button" className="btn ghost" disabled={busy} onClick={onEnd}>
+          End
+        </button>
+      </div>
+      <RoundSettings snapshot={snapshot} busy={busy} onSettings={onSettings} />
     </section>
   )
 }
@@ -138,10 +177,12 @@ function QuestionBoard({
   snapshot,
   busy,
   onEnd,
+  onSettings,
 }: {
   snapshot: RoomSnapshot
   busy: boolean
   onEnd: () => void
+  onSettings: (settings: RoomSettings) => void
 }) {
   const question = snapshot.question
   const left = useCountdown(question?.remainingMs ?? null, question != null)
@@ -164,7 +205,153 @@ function QuestionBoard({
           End
         </button>
       </div>
+      <RoundSettings snapshot={snapshot} busy={busy} onSettings={onSettings} />
     </section>
+  )
+}
+
+const BAND_LABEL: Record<DifficultyBand, string> = {
+  mixed: "Mixed",
+  "1-2": "1–2",
+  "2-4": "2–4",
+  "4-5": "4–5",
+}
+
+function RoundSettings({
+  snapshot,
+  busy,
+  onSettings,
+  open = false,
+}: {
+  snapshot: RoomSnapshot
+  busy: boolean
+  onSettings: (settings: RoomSettings) => void
+  open?: boolean
+}) {
+  const fields = <SettingsFields settings={snapshot.settings} busy={busy} onSettings={onSettings} />
+  if (open) {
+    return (
+      <section className="settings">
+        <h2>Round settings</h2>
+        {fields}
+      </section>
+    )
+  }
+  return (
+    <details className="settings-fold">
+      <summary>Round settings</summary>
+      {fields}
+    </details>
+  )
+}
+
+function SettingsFields({
+  settings,
+  busy,
+  onSettings,
+}: {
+  settings: RoomSettings
+  busy: boolean
+  onSettings: (settings: RoomSettings) => void
+}) {
+  return (
+    <div className="settings-fields">
+      <SecondsField
+        label="Answer time"
+        hint="seconds"
+        ms={settings.questionDurationMs}
+        minMs={ANSWER_TIME_MIN_MS}
+        maxMs={ANSWER_TIME_MAX_MS}
+        disabled={busy}
+        onMs={(questionDurationMs) => onSettings({ ...settings, questionDurationMs })}
+      />
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={settings.autoAdvance}
+          disabled={busy}
+          onChange={(event) => onSettings({ ...settings, autoAdvance: event.target.checked })}
+        />
+        Automatic next question
+      </label>
+      <SecondsField
+        label="Time to the next question"
+        hint="seconds after the answer"
+        ms={settings.revealDurationMs}
+        minMs={NEXT_TIME_MIN_MS}
+        maxMs={NEXT_TIME_MAX_MS}
+        disabled={busy}
+        onMs={(revealDurationMs) => onSettings({ ...settings, revealDurationMs })}
+      />
+      <div className="setting">
+        <span className="setting-label">Difficulty</span>
+        <div className="bands">
+          {DIFFICULTY_BANDS.map((band) => (
+            <button
+              key={band}
+              type="button"
+              className={settings.difficulty === band ? "btn primary" : "btn ghost"}
+              aria-pressed={settings.difficulty === band}
+              disabled={busy}
+              onClick={() => onSettings({ ...settings, difficulty: band })}
+            >
+              {BAND_LABEL[band]}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SecondsField({
+  label,
+  hint,
+  ms,
+  minMs,
+  maxMs,
+  disabled,
+  onMs,
+}: {
+  label: string
+  hint: string
+  ms: number
+  minMs: number
+  maxMs: number
+  disabled: boolean
+  onMs: (ms: number) => void
+}) {
+  const seconds = Math.round(ms / 1000)
+  const min = minMs / 1000
+  const max = maxMs / 1000
+  const [draft, setDraft] = useState(String(seconds))
+  const [source, setSource] = useState(ms)
+  if (ms !== source) {
+    setSource(ms)
+    setDraft(String(seconds))
+  }
+  return (
+    <label className="setting">
+      {label}
+      <span className="seconds">
+        <input
+          type="number"
+          inputMode="numeric"
+          min={min}
+          max={max}
+          step={1}
+          value={draft}
+          disabled={disabled}
+          onChange={(event) => {
+            const next = event.target.value
+            setDraft(next)
+            const parsed = Number(next)
+            if (Number.isInteger(parsed) && parsed >= min && parsed <= max) onMs(parsed * 1000)
+          }}
+        />
+        <span className="field-hint">{hint}</span>
+      </span>
+    </label>
   )
 }
 

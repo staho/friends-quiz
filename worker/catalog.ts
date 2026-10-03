@@ -39,8 +39,12 @@ export class CatalogDurableObject extends DurableObject<Env> {
     })
   }
 
-  async pickRandom(excludeIds: string[], difficulty?: number): Promise<Question | null> {
-    return pickRandomQuestion(sqliteDatabase(this.ctx.storage.sql), excludeIds, difficulty)
+  async pickRandom(
+    excludeIds: string[],
+    difficulty?: number,
+    bounds?: { minDifficulty: number; maxDifficulty: number },
+  ): Promise<Question | null> {
+    return pickRandomQuestion(sqliteDatabase(this.ctx.storage.sql), excludeIds, difficulty, bounds)
   }
 
   async recordPlay(play: QuestionPlay): Promise<boolean> {

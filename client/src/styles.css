@@ -193,6 +193,96 @@ button { touch-action: manipulation; }
   gap: 12px;
 }
 
+.settings,
+.settings-fold {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 4px 14px rgba(26, 18, 12, 0.05);
+}
+
+.settings h2,
+.settings-fold summary {
+  margin: 0;
+  color: #e07a00;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.95rem;
+  font-weight: 750;
+}
+
+.settings-fold summary {
+  cursor: pointer;
+}
+
+.settings-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.setting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  color: var(--muted);
+}
+
+.seconds {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setting input[type="number"] {
+  width: 5.5rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  padding: 10px 12px;
+  font-size: 1.2rem;
+  color: var(--ink);
+}
+
+.setting input[type="number"]:focus {
+  outline: none;
+  border-color: #2d6bff;
+  box-shadow: inset 0 0 0 2px #2d6bff;
+}
+
+.field-hint { color: var(--muted); }
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.check input {
+  appearance: auto;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 0;
+  accent-color: #e07a00;
+}
+
+.setting-label { color: var(--muted); }
+
+.bands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bands .btn { padding: 10px 16px; }
+
 .btn {
   border: 0;
   border-radius: 999px;

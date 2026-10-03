@@ -118,6 +118,9 @@ export function PlayerScreen() {
           <button type="submit" className="btn primary" disabled={busy}>
             Join
           </button>
+          <button type="button" className="btn ghost" onClick={() => window.location.assign("/host")}>
+            Host a game
+          </button>
         </form>
       )}
     </main>

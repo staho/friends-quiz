@@ -1,10 +1,13 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { BASE_POINTS, MAX_SPEED_BONUS } from "../shared/types.ts"
+import { BASE_POINTS, MAX_SPEED_BONUS, NEXT_TIME_DEFAULT_MS, type RoomSettings } from "../shared/types.ts"
 import {
   GameError,
+  advanceDue,
+  alarmAt,
   applyTick,
   createRoom,
+  difficultyBounds,
   difficultyForSlot,
   endGame,
   joinPlayer,
@@ -17,6 +20,7 @@ import {
   snapshotFor,
   startGame,
   submitChoice,
+  updateSettings,
   type Question,
   type Room,
 } from "../server/game.ts"
@@ -44,6 +48,16 @@ function roomWith(): Room {
 
 function addPlayer(room: Room, id: string, name: string): Room {
   return joinPlayer(room, { id, name, token: `token-${id}` }).room
+}
+
+function settings(overrides: Partial<RoomSettings> = {}): RoomSettings {
+  return {
+    questionDurationMs: duration,
+    revealDurationMs: NEXT_TIME_DEFAULT_MS,
+    autoAdvance: false,
+    difficulty: "mixed",
+    ...overrides,
+  }
 }
 
 describe("scoring", () => {
@@ -161,6 +175,101 @@ describe("answers", () => {
     const after = snapshotFor(room, { role: "player", playerId: "p1" }, 10, [])
     assert.equal(after.reveal?.correctIndex, 2)
     assert.equal(after.you.role === "player" ? after.you.choiceIndex : null, 2)
+  })
+})
+
+describe("host settings", () => {
+  it("keeps a manual next and the mixed ramp by default", () => {
+    const room = roomWith()
+    assert.equal(room.autoAdvance, false)
+    assert.equal(room.difficulty, "mixed")
+    assert.equal(room.revealDurationMs, NEXT_TIME_DEFAULT_MS)
+    assert.equal(difficultyBounds(room.difficulty), null)
+    const snap = snapshotFor(room, { role: "host" }, 0, [])
+    assert.equal(snap.revealRemainingMs, null)
+    assert.equal(snap.settings.difficulty, "mixed")
+  })
+
+  it("rejects times outside the allowed seconds", () => {
+    assert.throws(() => updateSettings(roomWith(), settings({ questionDurationMs: 4_000 }), 0), GameError)
+    assert.throws(() => updateSettings(roomWith(), settings({ questionDurationMs: 121_000 }), 0), GameError)
+    assert.throws(() => updateSettings(roomWith(), settings({ revealDurationMs: 1_000 }), 0), GameError)
+    assert.throws(() => updateSettings(roomWith(), settings({ revealDurationMs: 31_000 }), 0), GameError)
+  })
+
+  it("stores an answer time and a difficulty band", () => {
+    const room = updateSettings(roomWith(), settings({ questionDurationMs: 10_000, difficulty: "2-4" }), 0)
+    assert.equal(room.questionDurationMs, 10_000)
+    assert.equal(room.difficulty, "2-4")
+    assert.deepEqual(difficultyBounds(room.difficulty), { minDifficulty: 2, maxDifficulty: 4 })
+  })
+
+  it("reveals when a shorter answer time is already past", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = startGame(room, question("a", 0), 0)
+    room = updateSettings(room, settings({ questionDurationMs: 5_000 }), 6_000)
+    room = applyTick(room, 6_000)
+    assert.equal(room.phase, "reveal")
+  })
+
+  it("counts down to the next question only when automatic advance is on", () => {
+    let room = addPlayer(updateSettings(roomWith(), settings({ autoAdvance: true, revealDurationMs: 8_000 }), 0), "p1", "Ada")
+    room = startGame(room, question("a", 0), 0)
+    room = applyTick(room, duration)
+    assert.equal(room.advanceAt, duration + 8_000)
+    assert.equal(advanceDue(room, duration + 7_999), false)
+    assert.equal(advanceDue(room, duration + 8_000), true)
+    assert.equal(alarmAt(room), duration + 8_000)
+    const snap = snapshotFor(room, { role: "host" }, duration + 1_000, [])
+    assert.equal(snap.revealRemainingMs, 7_000)
+
+    let manual = addPlayer(roomWith(), "p1", "Ada")
+    manual = startGame(manual, question("a", 0), 0)
+    manual = applyTick(manual, duration)
+    assert.equal(manual.advanceAt, null)
+    assert.equal(advanceDue(manual, duration + 60_000), false)
+    assert.equal(alarmAt(manual), null)
+    assert.equal(snapshotFor(manual, { role: "host" }, duration, []).revealRemainingMs, null)
+  })
+
+  it("restarts the wait when the delay changes and clears it when automatic next is turned off", () => {
+    let room = addPlayer(updateSettings(roomWith(), settings({ autoAdvance: true, revealDurationMs: 8_000 }), 0), "p1", "Ada")
+    room = startGame(room, question("a", 0), 0)
+    room = applyTick(room, duration)
+    const started = room.advanceAt
+    room = updateSettings(room, settings({ autoAdvance: true, difficulty: "1-2" }), duration + 500)
+    assert.equal(room.advanceAt, started)
+    assert.equal(room.difficulty, "1-2")
+    room = updateSettings(room, settings({ autoAdvance: true, revealDurationMs: 4_000, difficulty: "1-2" }), duration + 1_000)
+    assert.equal(room.advanceAt, duration + 1_000 + 4_000)
+    room = updateSettings(room, settings({ autoAdvance: false, revealDurationMs: 4_000, difficulty: "1-2" }), duration + 1_500)
+    assert.equal(room.advanceAt, null)
+    assert.equal(room.revealDurationMs, 4_000)
+  })
+
+  it("keeps settings across a reset and fills defaults for an older room", () => {
+    let room = updateSettings(
+      roomWith(),
+      settings({ questionDurationMs: 12_000, autoAdvance: true, revealDurationMs: 5_000, difficulty: "4-5" }),
+      0,
+    )
+    room = addPlayer(room, "p1", "Ada")
+    room = startGame(room, question("a", 0), 0)
+    room = resetRound(room)
+    assert.equal(room.phase, "lobby")
+    assert.equal(room.questionDurationMs, 12_000)
+    assert.equal(room.autoAdvance, true)
+    assert.equal(room.revealDurationMs, 5_000)
+    assert.equal(room.difficulty, "4-5")
+    assert.equal(room.advanceAt, null)
+    assert.deepEqual(difficultyBounds("4-5"), { minDifficulty: 4, maxDifficulty: 5 })
+
+    const restored = restoreRoom({ code: "QUIZ", hostToken: "host" })
+    assert.equal(restored.autoAdvance, false)
+    assert.equal(restored.difficulty, "mixed")
+    assert.equal(restored.revealDurationMs, NEXT_TIME_DEFAULT_MS)
+    assert.equal(restored.advanceAt, null)
+    assert.equal(restored.questionDurationMs, duration)
   })
 })
 

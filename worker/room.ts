@@ -3,8 +3,11 @@ import { type HostSession, type PlayerSession } from "../shared/types.ts"
 import { parseClientMessage, type ClientMessage } from "../shared/wire.ts"
 import {
   GameError,
+  advanceDue,
+  alarmAt,
   applyTick,
   createRoom,
+  difficultyBounds,
   difficultyForSlot,
   endGame,
   joinPlayer,
@@ -18,6 +21,7 @@ import {
   snapshotFor,
   startGame,
   submitChoice,
+  updateSettings,
   type Question,
   type Room,
 } from "../server/game.ts"
@@ -105,7 +109,11 @@ export class RoomDurableObject extends DurableObject<Env> {
     const room = this.readRoom()
     if (!room) return
     const now = Date.now()
-    const next = applyTick(room, now)
+    let next = applyTick(room, now)
+    if (advanceDue(next, now)) {
+      const question = next.asked.length >= next.questionLimit ? null : await this.dealOrFinish(next)
+      next = applyTick(nextQuestion(next, question, now), now)
+    }
     if (next === room) {
       await this.arm(room)
       return
@@ -135,6 +143,10 @@ export class RoomDurableObject extends DurableObject<Env> {
       case "host:reset":
         this.requireHost(ws)
         await this.mutate((room) => resetRound(room))
+        return null
+      case "host:settings":
+        this.requireHost(ws)
+        await this.mutate((room, now) => updateSettings(room, message.payload, now))
         return null
       case "player:join":
         return this.join(ws, message.payload)
@@ -228,9 +240,13 @@ export class RoomDurableObject extends DurableObject<Env> {
   }
 
   private async dealOrFinish(room: Room): Promise<Question | null> {
+    const bounds = difficultyBounds(room.difficulty)
+    const slot = difficultyForSlot(room.asked.length)
+    const target = bounds ? Math.min(bounds.maxDifficulty, Math.max(bounds.minDifficulty, slot)) : slot
     const picked = await this.env.CATALOG.getByName("questions").pickRandom(
       [...roundStats(room).askedIds],
-      difficultyForSlot(room.asked.length),
+      target,
+      bounds ?? undefined,
     )
     if (!picked || picked.choices.length !== 4) return null
     const [first, second, third, fourth] = picked.choices
@@ -287,11 +303,11 @@ export class RoomDurableObject extends DurableObject<Env> {
   }
 
   private async arm(room: Room): Promise<void> {
-    if (room.phase !== "question" || room.questionStartedAt == null) {
+    const deadline = alarmAt(room)
+    if (deadline == null) {
       await this.ctx.storage.deleteAlarm()
       return
     }
-    const deadline = room.questionStartedAt + room.questionDurationMs
     const existing = await this.ctx.storage.getAlarm()
     if (existing !== deadline) await this.ctx.storage.setAlarm(deadline)
   }
