@@ -101,7 +101,7 @@ function HostBody({
           {formatCode(snapshot.code)}
         </p>
         <PlayerStrip players={snapshot.players} />
-        <RoundSettings snapshot={snapshot} busy={busy} onSettings={onSettings} open />
+        <RoundSettings snapshot={snapshot} busy={busy} onSettings={onSettings} />
         <div className="controls">
           <button type="button" className="btn primary" disabled={busy || snapshot.players.length === 0} onClick={onStart}>
             Start
@@ -221,26 +221,15 @@ function RoundSettings({
   snapshot,
   busy,
   onSettings,
-  open = false,
 }: {
   snapshot: RoomSnapshot
   busy: boolean
   onSettings: (settings: RoomSettings) => void
-  open?: boolean
 }) {
-  const fields = <SettingsFields settings={snapshot.settings} busy={busy} onSettings={onSettings} />
-  if (open) {
-    return (
-      <section className="settings">
-        <h2>Round settings</h2>
-        {fields}
-      </section>
-    )
-  }
   return (
     <details className="settings-fold">
       <summary>Round settings</summary>
-      {fields}
+      <SettingsFields settings={snapshot.settings} busy={busy} onSettings={onSettings} />
     </details>
   )
 }
