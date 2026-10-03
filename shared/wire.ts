@@ -4,6 +4,7 @@ export type ClientMessage =
   | { id: string; event: "host:attach"; payload: { code: string; hostToken: string } }
   | { id: string; event: "host:start" }
   | { id: string; event: "host:next" }
+  | { id: string; event: "host:pause" }
   | { id: string; event: "host:end" }
   | { id: string; event: "host:reset" }
   | { id: string; event: "host:settings"; payload: RoomSettings }
@@ -18,6 +19,7 @@ export function parseClientMessage(value: unknown): ClientMessage | null {
   switch (value.event) {
     case "host:start":
     case "host:next":
+    case "host:pause":
     case "host:end":
     case "host:reset":
     case "player:lock":

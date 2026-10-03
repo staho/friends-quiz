@@ -65,6 +65,7 @@ export function HostScreen() {
           busy={busy}
           onStart={() => run(() => request((ack) => socket.emit("host:start", ack)))}
           onNext={() => run(() => request((ack) => socket.emit("host:next", ack)))}
+          onPause={() => run(() => request((ack) => socket.emit("host:pause", ack)))}
           onEnd={() => run(() => request((ack) => socket.emit("host:end", ack)))}
           onReset={() => run(() => request((ack) => socket.emit("host:reset", ack)))}
           onSettings={(settings) => run(() => request((ack) => socket.emit("host:settings", settings, ack)))}
@@ -79,6 +80,7 @@ function HostBody({
   busy,
   onStart,
   onNext,
+  onPause,
   onEnd,
   onReset,
   onSettings,
@@ -87,6 +89,7 @@ function HostBody({
   busy: boolean
   onStart: () => void
   onNext: () => void
+  onPause: () => void
   onEnd: () => void
   onReset: () => void
   onSettings: (settings: RoomSettings) => void
@@ -117,7 +120,14 @@ function HostBody({
 
   if (snapshot.phase === "reveal" && snapshot.reveal) {
     return (
-      <RevealBoard snapshot={snapshot} busy={busy} onNext={onNext} onEnd={onEnd} onSettings={onSettings} />
+      <RevealBoard
+        snapshot={snapshot}
+        busy={busy}
+        onNext={onNext}
+        onPause={onPause}
+        onEnd={onEnd}
+        onSettings={onSettings}
+      />
     )
   }
 
@@ -139,35 +149,71 @@ function RevealBoard({
   snapshot,
   busy,
   onNext,
+  onPause,
   onEnd,
   onSettings,
 }: {
   snapshot: RoomSnapshot
   busy: boolean
   onNext: () => void
+  onPause: () => void
   onEnd: () => void
   onSettings: (settings: RoomSettings) => void
 }) {
   const reveal = snapshot.reveal
-  const left = useCountdown(snapshot.revealRemainingMs, snapshot.settings.autoAdvance)
+  const counting = snapshot.settings.autoAdvance && !snapshot.advancePaused
+  const left = useCountdown(snapshot.revealRemainingMs, counting)
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.code !== "Space" || event.repeat || busy || !snapshot.settings.autoAdvance) return
+      const target = event.target
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+      ) {
+        return
+      }
+      event.preventDefault()
+      onPause()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [busy, onPause, snapshot.settings.autoAdvance])
+
   if (!reveal) return null
+  const waiting = snapshot.settings.autoAdvance && snapshot.revealRemainingMs != null
   return (
     <section className="board">
       <p className="kicker">The answer</p>
       <h1 className="prompt">{reveal.prompt}</h1>
       <AnswerGrid choices={reveal.choices} selected={null} correctIndex={reveal.correctIndex} />
       <ScoreList snapshot={snapshot} />
-      {snapshot.settings.autoAdvance && snapshot.revealRemainingMs != null && (
-        <p className="hint">{left <= 0 ? "Next question now" : `Next question in ${Math.ceil(left / 1000)}s`}</p>
+      {waiting && (
+        <p className="hint">
+          {snapshot.advancePaused
+            ? `Holding the answer · ${Math.ceil(left / 1000)}s left`
+            : left <= 0
+              ? "Next question now"
+              : `Next question in ${Math.ceil(left / 1000)}s`}
+        </p>
       )}
       <div className="controls">
         <button type="button" className="btn primary" disabled={busy} onClick={onNext}>
           Next
         </button>
+        {snapshot.settings.autoAdvance && (
+          <button type="button" className="btn ghost" disabled={busy} onClick={onPause}>
+            {snapshot.advancePaused ? "Resume" : "Pause"}
+          </button>
+        )}
         <button type="button" className="btn ghost" disabled={busy} onClick={onEnd}>
           End
         </button>
       </div>
+      {snapshot.settings.autoAdvance && (
+        <p className="hint">{snapshot.advancePaused ? "Holding the answer" : "Space pauses"}</p>
+      )}
       <RoundSettings snapshot={snapshot} busy={busy} onSettings={onSettings} />
     </section>
   )

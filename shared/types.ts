@@ -87,6 +87,7 @@ export interface RoomSnapshot {
   lanAddresses: string[]
   settings: RoomSettings
   revealRemainingMs: number | null
+  advancePaused: boolean
 }
 
 export interface HostSession {
@@ -111,6 +112,7 @@ export interface ClientToServerEvents {
   ) => void
   "host:start": (ack: (res: Ack<null>) => void) => void
   "host:next": (ack: (res: Ack<null>) => void) => void
+  "host:pause": (ack: (res: Ack<null>) => void) => void
   "host:end": (ack: (res: Ack<null>) => void) => void
   "host:reset": (ack: (res: Ack<null>) => void) => void
   "host:settings": (payload: RoomSettings, ack: (res: Ack<null>) => void) => void

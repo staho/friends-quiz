@@ -91,6 +91,8 @@ export interface Room {
   autoAdvance: boolean
   difficulty: DifficultyBand
   advanceAt: number | null
+  advancePaused: boolean
+  advanceRemainingMs: number | null
   answers: Record<string, PlayerAnswer>
   reveal: PublicReveal | null
   roundId: string | null
@@ -169,6 +171,8 @@ export function createRoom(options: {
     autoAdvance: true,
     difficulty: "mixed",
     advanceAt: null,
+    advancePaused: false,
+    advanceRemainingMs: null,
     answers: {},
     reveal: null,
     roundId: null,
@@ -196,7 +200,7 @@ export function restoreRoom(raw: unknown): Room {
     revealDurationMs: readRevealDuration(value.revealDurationMs),
     autoAdvance: value.autoAdvance !== false,
     difficulty: readDifficultyBand(value.difficulty),
-    advanceAt: readAdvanceAt(value.autoAdvance !== false, value.advanceAt),
+    ...readAdvance(value),
     answers: value.answers ?? {},
     reveal: value.reveal ?? null,
     roundId: readRoundId(value.roundId),
@@ -395,11 +399,40 @@ export function updateSettings(room: Room, input: RoomSettings, now: number): Ro
   if (room.phase !== "reveal") return next
   const timingChanged = room.autoAdvance !== next.autoAdvance || room.revealDurationMs !== next.revealDurationMs
   if (!timingChanged) return next
-  return { ...next, advanceAt: next.autoAdvance ? now + next.revealDurationMs : null }
+  return {
+    ...next,
+    ...stoppedAdvance(),
+    advanceAt: next.autoAdvance ? now + next.revealDurationMs : null,
+  }
+}
+
+export function toggleAdvancePause(room: Room, now: number): Room {
+  if (room.phase !== "reveal" || !room.autoAdvance) throw new GameError("Nothing to pause")
+  if (!room.advancePaused) {
+    return {
+      ...room,
+      advancePaused: true,
+      advanceAt: null,
+      advanceRemainingMs: holdLeft(room, now),
+    }
+  }
+  const remaining = room.advanceRemainingMs ?? 0
+  return {
+    ...room,
+    advancePaused: false,
+    advanceAt: now + remaining,
+    advanceRemainingMs: null,
+  }
 }
 
 export function advanceDue(room: Room, now: number): boolean {
-  return room.phase === "reveal" && room.autoAdvance && room.advanceAt != null && now >= room.advanceAt
+  return (
+    room.phase === "reveal" &&
+    room.autoAdvance &&
+    !room.advancePaused &&
+    room.advanceAt != null &&
+    now >= room.advanceAt
+  )
 }
 
 export function alarmAt(room: Room): number | null {
@@ -471,6 +504,7 @@ export function reveal(room: Room, now: number): Room {
       ...room,
       phase: "reveal",
       questionStartedAt: null,
+      ...stoppedAdvance(),
       advanceAt: room.autoAdvance ? now + room.revealDurationMs : null,
       history: [...room.history, ...history],
       players: room.players.map((player) => {
@@ -496,7 +530,7 @@ export function nextQuestion(room: Room, question: Question | null, now: number)
       ...room,
       phase: "finished",
       questionStartedAt: null,
-      advanceAt: null,
+      ...stoppedAdvance(),
       answers: {},
     }
   }
@@ -506,7 +540,7 @@ export function nextQuestion(room: Room, question: Question | null, now: number)
     questionIndex: room.asked.length,
     phase: "question",
     questionStartedAt: now,
-    advanceAt: null,
+    ...stoppedAdvance(),
     answers: {},
     reveal: null,
   }
@@ -519,7 +553,7 @@ export function endGame(room: Room): Room {
     ...room,
     phase: "finished",
     questionStartedAt: null,
-    advanceAt: null,
+    ...stoppedAdvance(),
     answers: {},
   }
 }
@@ -533,7 +567,7 @@ export function resetRound(room: Room): Room {
     questionIndex: 0,
     phase: "lobby",
     questionStartedAt: null,
-    advanceAt: null,
+    ...stoppedAdvance(),
     answers: {},
     reveal: null,
     roundId: null,
@@ -574,6 +608,7 @@ export function snapshotFor(room: Room, viewer: Viewer, now: number, lanAddresse
     lanAddresses,
     settings: roomSettings(room),
     revealRemainingMs: revealWaitMs(room, now),
+    advancePaused: room.phase === "reveal" && room.advancePaused,
   }
 }
 
@@ -629,8 +664,36 @@ function roomSettings(room: Room): RoomSettings {
   }
 }
 
+function stoppedAdvance(): Pick<Room, "advanceAt" | "advancePaused" | "advanceRemainingMs"> {
+  return { advanceAt: null, advancePaused: false, advanceRemainingMs: null }
+}
+
+function readAdvance(value: StoredRoom): Pick<Room, "advanceAt" | "advancePaused" | "advanceRemainingMs"> {
+  const autoAdvance = value.autoAdvance !== false
+  const advancePaused = autoAdvance && value.advancePaused === true
+  if (!advancePaused) return { ...stoppedAdvance(), advanceAt: readAdvanceAt(autoAdvance, value.advanceAt) }
+  return {
+    advancePaused: true,
+    advanceAt: null,
+    advanceRemainingMs: readOptionalMs(value.advanceRemainingMs) ?? 0,
+  }
+}
+
+function readOptionalMs(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null
+  return Math.max(0, value)
+}
+
+function holdLeft(room: Room, now: number): number {
+  if (room.advancePaused) return room.advanceRemainingMs ?? 0
+  if (room.advanceAt == null) return 0
+  return Math.max(0, room.advanceAt - now)
+}
+
 function revealWaitMs(room: Room, now: number): number | null {
-  if (room.phase !== "reveal" || !room.autoAdvance || room.advanceAt == null) return null
+  if (room.phase !== "reveal" || !room.autoAdvance) return null
+  if (room.advancePaused) return room.advanceRemainingMs ?? 0
+  if (room.advanceAt == null) return null
   return Math.max(0, room.advanceAt - now)
 }
 

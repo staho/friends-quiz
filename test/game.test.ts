@@ -5,6 +5,7 @@ import {
   GameError,
   advanceDue,
   alarmAt,
+  toggleAdvancePause,
   applyTick,
   createRoom,
   difficultyBounds,
@@ -248,6 +249,40 @@ describe("host settings", () => {
     room = updateSettings(room, settings({ autoAdvance: false, revealDurationMs: 4_000, difficulty: "1-2" }), duration + 1_500)
     assert.equal(room.advanceAt, null)
     assert.equal(room.revealDurationMs, 4_000)
+  })
+
+  it("holds the countdown while the host pauses and resumes the remaining wait", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = startGame(room, question("a", 0), 0)
+    room = applyTick(room, duration)
+    assert.equal(room.advanceAt, duration + NEXT_TIME_DEFAULT_MS)
+    assert.equal(room.advancePaused, false)
+
+    room = toggleAdvancePause(room, duration + 3_000)
+    assert.equal(room.advancePaused, true)
+    assert.equal(room.advanceAt, null)
+    assert.equal(room.advanceRemainingMs, NEXT_TIME_DEFAULT_MS - 3_000)
+    assert.equal(advanceDue(room, duration + NEXT_TIME_DEFAULT_MS), false)
+    assert.equal(alarmAt(room), null)
+    const held = snapshotFor(room, { role: "host" }, duration + 9_000, [])
+    assert.equal(held.advancePaused, true)
+    assert.equal(held.revealRemainingMs, NEXT_TIME_DEFAULT_MS - 3_000)
+
+    room = toggleAdvancePause(room, duration + 9_000)
+    assert.equal(room.advancePaused, false)
+    assert.equal(room.advanceAt, duration + 9_000 + (NEXT_TIME_DEFAULT_MS - 3_000))
+    assert.equal(room.advanceRemainingMs, null)
+    assert.equal(advanceDue(room, room.advanceAt - 1), false)
+    assert.equal(advanceDue(room, room.advanceAt), true)
+  })
+
+  it("refuses to pause before the answer is showing or when automatic next is off", () => {
+    const room = addPlayer(roomWith(), "p1", "Ada")
+    assert.throws(() => toggleAdvancePause(startGame(room, question("a", 0), 0), 1), GameError)
+    let manual = addPlayer(updateSettings(roomWith(), settings({ autoAdvance: false }), 0), "p1", "Ada")
+    manual = startGame(manual, question("a", 0), 0)
+    manual = applyTick(manual, duration)
+    assert.throws(() => toggleAdvancePause(manual, duration), GameError)
   })
 
   it("keeps settings across a reset and fills defaults for an older room", () => {

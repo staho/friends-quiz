@@ -21,6 +21,7 @@ import {
   snapshotFor,
   startGame,
   submitChoice,
+  toggleAdvancePause,
   updateSettings,
   type Question,
   type Room,
@@ -135,6 +136,10 @@ export class RoomDurableObject extends DurableObject<Env> {
           if (room.asked.length >= room.questionLimit) return nextQuestion(room, null, now)
           return nextQuestion(room, await this.dealOrFinish(room), now)
         })
+        return null
+      case "host:pause":
+        this.requireHost(ws)
+        await this.mutate((room, now) => toggleAdvancePause(room, now))
         return null
       case "host:end":
         this.requireHost(ws)
