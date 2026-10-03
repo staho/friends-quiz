@@ -100,6 +100,11 @@ export function scoreAnswer(correct: boolean, elapsedMs: number, durationMs: num
   return BASE_POINTS + Math.round(speedRatio * MAX_SPEED_BONUS)
 }
 
+export function difficultyForSlot(askedCount: number): number {
+  if (askedCount < 0) return 1
+  return Math.min(5, Math.floor(askedCount / 2) + 1)
+}
+
 export function shuffle<T>(items: readonly T[], rng: () => number = Math.random): T[] {
   const copy = [...items]
   for (let i = copy.length - 1; i > 0; i--) {
@@ -473,6 +478,7 @@ export function snapshotFor(room: Room, viewer: Viewer, now: number, lanAddresse
           total: room.questionLimit,
           durationMs: room.questionDurationMs,
           remainingMs: remainingMs(room, now),
+          difficulty: question.difficulty,
         }
       : null,
     reveal: room.phase === "reveal" || room.phase === "finished" ? room.reveal : null,
