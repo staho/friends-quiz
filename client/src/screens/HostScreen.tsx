@@ -55,7 +55,10 @@ export function HostScreen() {
 
   return (
     <main className="stage tv">
-      <p className="eyebrow">Friends quiz</p>
+      <div className="stage-bar">
+        <p className="eyebrow">Friends quiz</p>
+        <FullScreenToggle />
+      </div>
       {!connected && <p className="banner">Reconnecting to the table…</p>}
       {error && <p className="banner">{error}</p>}
       {!snapshot ? (
@@ -143,7 +146,7 @@ function HostBody({
   }
 
   return (
-    <section className="board">
+    <section className="board final">
       <p className="kicker">Final table</p>
       <Podium players={snapshot.players} />
       <div className="controls">
@@ -195,7 +198,7 @@ function RevealBoard({
   if (!reveal) return null
   const waiting = snapshot.settings.autoAdvance && snapshot.revealRemainingMs != null
   return (
-    <section className="board">
+    <section className="board reveal">
       <p className="kicker">The answer</p>
       <h1 className="prompt">{reveal.prompt}</h1>
       <AnswerGrid choices={reveal.choices} selected={null} correctIndex={reveal.correctIndex} />
@@ -281,7 +284,7 @@ function QuestionBoard({
   const active = snapshot.players.filter((player) => player.connected)
   const locked = active.filter((player) => player.locked).length
   return (
-    <section className="board">
+    <section className="board question">
       <p className="kicker">
         Question {question.index + 1} of {question.total} · Level {question.difficulty}
       </p>
@@ -473,7 +476,7 @@ function ScoreList({ snapshot }: { snapshot: RoomSnapshot }) {
     <ol className="scores">
       {results.map((result) => (
         <li key={result.playerId}>
-          <span>{result.name}</span>
+          <span className="score-name">{result.name}</span>
           <span className={result.correct ? "gain" : "miss"}>
             {result.choiceIndex == null ? "no answer" : result.correct ? `+${result.points}` : "miss"}
           </span>
@@ -497,6 +500,89 @@ function Podium({ players }: { players: PublicPlayer[] }) {
         </li>
       ))}
     </ol>
+  )
+}
+
+type WebkitDocument = Document & {
+  webkitFullscreenElement?: Element | null
+  webkitExitFullscreen?: () => void
+}
+
+type WebkitElement = HTMLElement & {
+  webkitRequestFullscreen?: () => void
+}
+
+function currentFullscreen(): Element | null {
+  const doc = document as WebkitDocument
+  return document.fullscreenElement ?? doc.webkitFullscreenElement ?? null
+}
+
+async function enterFullscreen(): Promise<void> {
+  const root = document.documentElement as WebkitElement
+  if (typeof root.requestFullscreen === "function") {
+    await root.requestFullscreen()
+    return
+  }
+  if (typeof root.webkitRequestFullscreen === "function") {
+    root.webkitRequestFullscreen()
+    return
+  }
+  throw new Error("unavailable")
+}
+
+async function leaveFullscreen(): Promise<void> {
+  const doc = document as WebkitDocument
+  if (document.fullscreenElement && typeof document.exitFullscreen === "function") {
+    await document.exitFullscreen()
+    return
+  }
+  if (typeof doc.webkitExitFullscreen === "function") {
+    doc.webkitExitFullscreen()
+    return
+  }
+  throw new Error("unavailable")
+}
+
+function FullScreenToggle() {
+  const [active, setActive] = useState(() => currentFullscreen() != null)
+  const [unavailable, setUnavailable] = useState(false)
+
+  useEffect(() => {
+    const sync = () => {
+      const on = currentFullscreen() != null
+      setActive(on)
+      if (on) setUnavailable(false)
+    }
+    document.addEventListener("fullscreenchange", sync)
+    document.addEventListener("webkitfullscreenchange", sync)
+    return () => {
+      document.removeEventListener("fullscreenchange", sync)
+      document.removeEventListener("webkitfullscreenchange", sync)
+    }
+  }, [])
+
+  async function toggle() {
+    setUnavailable(false)
+    try {
+      if (currentFullscreen()) await leaveFullscreen()
+      else await enterFullscreen()
+    } catch {
+      setUnavailable(true)
+    }
+  }
+
+  return (
+    <div className="fullscreen-control">
+      <button
+        type="button"
+        className="btn ghost fullscreen-btn"
+        aria-pressed={active}
+        onClick={() => void toggle()}
+      >
+        {active ? "Exit full screen" : "Full screen"}
+      </button>
+      {unavailable && <p className="fullscreen-hint">Full screen isn't available in this browser</p>}
+    </div>
   )
 }
 
