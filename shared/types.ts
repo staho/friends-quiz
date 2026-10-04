@@ -15,7 +15,7 @@ export type DifficultyBand = (typeof DIFFICULTY_BANDS)[number]
 export const CHOICES = [
   { key: "A", color: "#e23b3b", ink: "#fff8f4" },
   { key: "B", color: "#2d6bff", ink: "#f4f7ff" },
-  { key: "C", color: "#f0b429", ink: "#1a1208" },
+  { key: "C", color: "#f0b429", ink: "#fff8f4" },
   { key: "D", color: "#2f9e5f", ink: "#f3fff7" },
 ] as const
 
