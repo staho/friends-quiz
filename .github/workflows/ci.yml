@@ -34,30 +34,44 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           node --input-type=module <<'EOF'
           const account = process.env.CLOUDFLARE_ACCOUNT_ID
           const token = process.env.CLOUDFLARE_API_TOKEN
-          const url = `https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/friends-quiz/subdomain`
+          const worker = `https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/friends-quiz`
           const headers = {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
-            "Cloudflare-Workers-Script-Api-Date": "2025-08-01",
           }
-          const current = await fetch(url, { headers })
-          const body = await current.json()
-          const enabled = body?.result?.enabled === true
-          const updated = await fetch(url, {
+          const subdomain = await fetch(`${worker}/subdomain`, {
             method: "POST",
-            headers,
-            body: JSON.stringify({ enabled, previews_enabled: true }),
+            headers: { ...headers, "Cloudflare-Workers-Script-Api-Date": "2025-08-01" },
+            body: JSON.stringify({ enabled: false, previews_enabled: false }),
           })
-          if (!updated.ok) {
-            console.error(await updated.text())
+          if (!subdomain.ok) {
+            console.error(await subdomain.text())
+            process.exit(1)
+          }
+          const domains = await fetch(`${worker}/domains/records`, {
+            method: "PUT",
+            headers,
+            body: JSON.stringify({
+              override_scope: true,
+              override_existing_origin: false,
+              override_existing_dns_record: false,
+              origins: [
+                { hostname: "friends-quiz.staho.dev" },
+                { hostname: "staho.dev", enabled: false, previews_enabled: true },
+              ],
+            }),
+          })
+          if (!domains.ok) {
+            console.error(await domains.text())
             process.exit(1)
           }
           EOF
-          npx wrangler preview --name "pr-${{ github.event.pull_request.number }}" --json --message "Pull request #${{ github.event.pull_request.number }}" > preview.json
+          npx wrangler preview --name "friends-quiz-pr-${PR_NUMBER}" --json --message "Pull request #${PR_NUMBER}" > preview.json
           node --input-type=module <<'EOF'
           import { readFileSync, appendFileSync } from "node:fs"
           const raw = readFileSync("preview.json", "utf8")
@@ -68,23 +82,27 @@ jobs:
             ...(parsed.preview?.urls ?? []),
             ...(parsed.deployment?.urls ?? []),
           ].filter((url) => typeof url === "string"))]
+          const host = `friends-quiz-pr-${process.env.PR_NUMBER}.staho.dev`
+          const preview = urls.find((url) => {
+            try {
+              return new URL(url).hostname === host
+            } catch {
+              return false
+            }
+          })
           const summary = [
             "## Quiz preview",
             "",
-            ...urls.map((url) => `- ${url}`),
+            preview ? `- https://${host}/host` : "",
             "",
-            "Open `/host` on that address for the TV. The preview URL is public.",
+            "The preview address is public. Production stays at friends-quiz.staho.dev.",
             "",
-          ].join("\n")
-          appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary)
-          if (urls.length === 0) {
-            console.error("Wrangler did not return a preview URL")
-            console.error(JSON.stringify({
-              keys: Object.keys(parsed),
-              preview: parsed.preview ? Object.keys(parsed.preview) : null,
-              deployment: parsed.deployment ? Object.keys(parsed.deployment) : null,
-            }))
+          ].filter((line) => line !== "").join("\n")
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary}\n`)
+          if (!preview) {
+            console.error(`Wrangler did not return https://${host}`)
+            console.error(urls.join("\n"))
             process.exit(1)
           }
-          console.log(urls.join("\n"))
+          console.log(`https://${host}/host`)
           EOF

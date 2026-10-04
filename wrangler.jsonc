@@ -5,7 +5,7 @@
   "compatibility_date": "2026-09-30",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
-  "preview_urls": true,
+  "preview_urls": false,
   "assets": {
     "directory": "./client/dist",
     "binding": "ASSETS",
@@ -26,7 +26,15 @@
   "observability": {
     "enabled": true
   },
-  "routes": [{ "pattern": "friends-quiz.staho.dev", "custom_domain": true }],
+  "routes": [
+    { "pattern": "friends-quiz.staho.dev", "custom_domain": true },
+    {
+      "pattern": "staho.dev",
+      "custom_domain": true,
+      "enabled": false,
+      "previews_enabled": true
+    }
+  ],
   "previews": {
     "durable_objects": {
       "bindings": [
