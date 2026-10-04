@@ -70,7 +70,7 @@ button { touch-action: manipulation; }
 
 .board.reveal,
 .board.final {
-  overflow: hidden;
+  overflow: auto;
 }
 
 .board.reveal > :not(.scores),
@@ -458,7 +458,7 @@ html:-webkit-full-screen .stage.tv {
 .board.reveal .scores,
 .board.final .podium {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 4.5rem;
   overflow: auto;
 }
 
