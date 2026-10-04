@@ -1,3 +1,4 @@
+import { QRCodeSVG } from "qrcode.react"
 import { useEffect, useState } from "react"
 import {
   ANSWER_TIME_MAX_MS,
@@ -11,7 +12,7 @@ import {
   type RoomSettings,
   type RoomSnapshot,
 } from "@shared/types"
-import { AnswerGrid, TimerBar, formatCode, joinOrigin } from "../components"
+import { AnswerGrid, TimerBar, formatCode, joinOrigin, joinUrl } from "../components"
 import { request, socket } from "../socket"
 import { useCountdown } from "../useCountdown"
 import { useRoom } from "../useRoom"
@@ -96,13 +97,19 @@ function HostBody({
 }) {
   if (snapshot.phase === "lobby") {
     const origin = joinOrigin(snapshot.lanAddresses)
+    const url = joinUrl(origin, snapshot.code)
     return (
       <section className="lobby">
-        <p className="hint">Join on your phone</p>
-        <p className="join-url">{origin}</p>
-        <p className="code" aria-label={`Room code ${snapshot.code}`}>
-          {formatCode(snapshot.code)}
-        </p>
+        <div className="join-row">
+          <div className="join-copy">
+            <p className="hint">Join on your phone</p>
+            <p className="join-url">{origin}</p>
+            <p className="code" aria-label={`Room code ${snapshot.code}`}>
+              {formatCode(snapshot.code)}
+            </p>
+          </div>
+          <JoinQr url={url} />
+        </div>
         <PlayerStrip players={snapshot.players} />
         <RoundSettings snapshot={snapshot} busy={busy} onSettings={onSettings} />
         <div className="controls">
@@ -387,6 +394,23 @@ function SecondsField({
         <span className="field-hint">{hint}</span>
       </span>
     </label>
+  )
+}
+
+function JoinQr({ url }: { url: string }) {
+  return (
+    <div className="join-qr">
+      <QRCodeSVG
+        value={url}
+        size={220}
+        level="H"
+        marginSize={4}
+        bgColor="#ffffff"
+        fgColor="#1a120c"
+        role="img"
+        aria-label={`Scan to join ${url}`}
+      />
+    </div>
   )
 }
 
