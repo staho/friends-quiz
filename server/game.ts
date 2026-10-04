@@ -328,6 +328,16 @@ export function setPlayerConnected(room: Room, playerId: string, connected: bool
   return replacePlayer(room, { ...player, connected })
 }
 
+export function withLiveConnections(room: Room, livePlayerIds: ReadonlySet<string>): Room {
+  let next = room
+  for (const player of room.players) {
+    if (player.connected && !livePlayerIds.has(player.id)) {
+      next = setPlayerConnected(next, player.id, false)
+    }
+  }
+  return next
+}
+
 export function startGame(room: Room, question: Question, now: number, roundId: string = crypto.randomUUID()): Room {
   if (room.phase !== "lobby") throw new GameError("The round has already started")
   if (room.players.length === 0) throw new GameError("Wait for at least one player")
