@@ -182,6 +182,27 @@ describe("answers", () => {
     room = applyTick(room, 0)
     assert.equal(room.phase, "reveal")
     assert.equal(room.players[0]?.score, BASE_POINTS + MAX_SPEED_BONUS)
+    assert.equal(room.reveal?.results[0]?.locked, true)
+    assert.equal(room.reveal?.results[0]?.elapsedMs, 0)
+  })
+
+  it("keeps the question open while someone connected has not locked", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = addPlayer(room, "p2", "Bea")
+    room = playing(room, question("a", 0), 0)
+    room = submitChoice(room, "p1", 0, 100)
+    room = lockAnswer(room, "p1", 500)
+    room = applyTick(room, 500)
+    assert.equal(room.phase, "question")
+    room = submitChoice(room, "p2", 0, 19_000)
+    room = applyTick(room, duration)
+    assert.equal(room.phase, "reveal")
+    const ada = room.reveal?.results.find((result) => result.playerId === "p1")
+    const bea = room.reveal?.results.find((result) => result.playerId === "p2")
+    assert.equal(ada?.locked, true)
+    assert.equal(ada?.elapsedMs, 500)
+    assert.equal(bea?.locked, false)
+    assert.equal(bea?.elapsedMs, duration)
   })
 
   it("scores a wrong answer as zero", () => {

@@ -522,6 +522,8 @@ export function reveal(room: Room, now: number): Room {
       correct: answer != null && correct,
       points,
       score: player.score + points,
+      elapsedMs,
+      locked: answer?.locked === true,
     }
   })
 

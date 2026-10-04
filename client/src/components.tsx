@@ -91,3 +91,9 @@ export function joinUrl(origin: string, code: string): string {
 export function formatCode(code: string): string {
   return code.split("").join(" ")
 }
+
+export function formatLockSeconds(elapsedMs: number): string {
+  const seconds = Math.max(0, elapsedMs) / 1000
+  const rounded = seconds >= 10 ? Math.round(seconds) : Math.round(seconds * 10) / 10
+  return `${rounded}s`
+}
