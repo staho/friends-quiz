@@ -16,3 +16,93 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - run: npm run check
+
+  preview:
+    needs: test
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Deploy a Workers preview
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          node --input-type=module <<'EOF'
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID
+          const token = process.env.CLOUDFLARE_API_TOKEN
+          const worker = `https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/friends-quiz`
+          const headers = {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          }
+          const subdomain = await fetch(`${worker}/subdomain`, {
+            method: "POST",
+            headers: { ...headers, "Cloudflare-Workers-Script-Api-Date": "2025-08-01" },
+            body: JSON.stringify({ enabled: false, previews_enabled: false }),
+          })
+          if (!subdomain.ok) {
+            console.error(await subdomain.text())
+            process.exit(1)
+          }
+          const domains = await fetch(`${worker}/domains/records`, {
+            method: "PUT",
+            headers,
+            body: JSON.stringify({
+              override_scope: true,
+              override_existing_origin: false,
+              override_existing_dns_record: false,
+              origins: [
+                { hostname: "friends-quiz.staho.dev" },
+                { hostname: "staho.dev", enabled: false, previews_enabled: true },
+              ],
+            }),
+          })
+          if (!domains.ok) {
+            console.error(await domains.text())
+            process.exit(1)
+          }
+          EOF
+          npx wrangler preview --name "friends-quiz-pr-${PR_NUMBER}" --json --message "Pull request #${PR_NUMBER}" > preview.json
+          node --input-type=module <<'EOF'
+          import { readFileSync, appendFileSync } from "node:fs"
+          const raw = readFileSync("preview.json", "utf8")
+          const parsed = JSON.parse(raw.slice(raw.indexOf("{")))
+          const urls = [...new Set([
+            ...(parsed.preview_urls ?? []),
+            ...(parsed.deployment_urls ?? []),
+            ...(parsed.preview?.urls ?? []),
+            ...(parsed.deployment?.urls ?? []),
+          ].filter((url) => typeof url === "string"))]
+          const host = `friends-quiz-pr-${process.env.PR_NUMBER}.staho.dev`
+          const preview = urls.find((url) => {
+            try {
+              return new URL(url).hostname === host
+            } catch {
+              return false
+            }
+          })
+          const summary = [
+            "## Quiz preview",
+            "",
+            preview ? `- https://${host}/host` : "",
+            "",
+            "The preview address is public. Production stays at friends-quiz.staho.dev.",
+            "",
+          ].filter((line) => line !== "").join("\n")
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary}\n`)
+          if (!preview) {
+            console.error(`Wrangler did not return https://${host}`)
+            console.error(urls.join("\n"))
+            process.exit(1)
+          }
+          console.log(`https://${host}/host`)
+          EOF

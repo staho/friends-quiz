@@ -246,7 +246,7 @@ describe("host settings", () => {
     assert.equal(room.advanceAt, duration + NEXT_TIME_DEFAULT_MS)
     const snap = snapshotFor(room, { role: "host" }, duration, [])
     assert.equal(snap.settings.autoAdvance, true)
-    assert.equal(snap.revealRemainingMs, NEXT_TIME_DEFAULT_MS)
+    assert.equal(snap.revealRemainingMs, NEXT_TIME_DEFAULT_MS + READY_DURATION_MS)
   })
 
   it("rejects times outside the allowed seconds", () => {
@@ -280,7 +280,7 @@ describe("host settings", () => {
     assert.equal(advanceDue(room, duration + 8_000), true)
     assert.equal(alarmAt(room), duration + 8_000)
     const snap = snapshotFor(room, { role: "host" }, duration + 1_000, [])
-    assert.equal(snap.revealRemainingMs, 7_000)
+    assert.equal(snap.revealRemainingMs, 7_000 + READY_DURATION_MS)
 
     let manual = addPlayer(updateSettings(roomWith(), settings({ autoAdvance: false }), 0), "p1", "Ada")
     manual = playing(manual, question("a", 0), 0)
@@ -289,6 +289,19 @@ describe("host settings", () => {
     assert.equal(advanceDue(manual, duration + 60_000), false)
     assert.equal(alarmAt(manual), null)
     assert.equal(snapshotFor(manual, { role: "host" }, duration, []).revealRemainingMs, null)
+  })
+
+  it("counts the get-ready countdown in the wait after the answer", () => {
+    let room = addPlayer(updateSettings(roomWith(), settings({ autoAdvance: true, revealDurationMs: 5_000 }), 0), "p1", "Ada")
+    room = playing(room, question("a", 0), 0)
+    room = applyTick(room, duration)
+    assert.equal(snapshotFor(room, { role: "host" }, duration, []).revealRemainingMs, 5_000 + READY_DURATION_MS)
+    assert.equal(advanceDue(room, duration + 5_000 - 1), false)
+    room = applyTick(nextQuestion(room, question("b", 1), duration + 5_000), duration + 5_000)
+    assert.equal(room.phase, "ready")
+    room = applyTick(room, duration + 5_000 + READY_DURATION_MS)
+    assert.equal(room.phase, "question")
+    assert.equal(room.questionStartedAt, duration + 8_000)
   })
 
   it("restarts the wait when the delay changes and clears it when automatic next is turned off", () => {
@@ -321,7 +334,7 @@ describe("host settings", () => {
     assert.equal(alarmAt(room), null)
     const held = snapshotFor(room, { role: "host" }, duration + 9_000, [])
     assert.equal(held.advancePaused, true)
-    assert.equal(held.revealRemainingMs, NEXT_TIME_DEFAULT_MS - 3_000)
+    assert.equal(held.revealRemainingMs, NEXT_TIME_DEFAULT_MS - 3_000 + READY_DURATION_MS)
 
     room = toggleAdvancePause(room, duration + 9_000)
     assert.equal(room.advancePaused, false)
