@@ -65,7 +65,7 @@ function SettingsFields({
       </label>
       <SecondsField
         label="Time to the next question"
-        hint="seconds after the answer"
+        hint="seconds on the answer, then 3 to get ready"
         ms={settings.revealDurationMs}
         minMs={NEXT_TIME_MIN_MS}
         maxMs={NEXT_TIME_MAX_MS}

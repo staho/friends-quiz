@@ -7,7 +7,7 @@ A pub quiz for one TV and a phone per player. The TV shows the question and four
 1. Players join the lobby. The host presses **Start** once someone is in.
 2. A question stays open for 20 seconds. A player can change the selected answer until they press **Lock in** or the timer ends.
 3. The question reveals early when every connected player has locked in.
-4. The next question starts 8 seconds after the answer. The host can change that wait, turn it off, or pause it. **Pause** or the space bar holds the countdown. **Next** skips the wait. **End** jumps to the podium.
+4. The answer stays up for 8 seconds, then a 3 second get-ready countdown. The host can change that wait, turn it off, or pause it. The countdown on the answer includes the get-ready time. **Pause** or the space bar holds the countdown. **Next** skips the wait. **End** jumps to the podium.
 5. A round is 10 questions, two from each difficulty level, played from warm-up to expert. The next one is chosen when the host starts or the countdown ends, from unused questions at that level.
 
 A correct answer scores 500 points, plus up to 500 more for an instant lock. A correct answer as the timer ends scores 500. A wrong answer or no answer scores 0. The formula is `scoreAnswer` in [`server/game.ts`](server/game.ts). Each answer is kept on the room, with the question category and difficulty, so a later picker can use how the table is doing.

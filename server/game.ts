@@ -820,9 +820,13 @@ function holdLeft(room: Room, now: number): number {
 
 function revealWaitMs(room: Room, now: number): number | null {
   if (room.phase !== "reveal" || !room.autoAdvance) return null
-  if (room.advancePaused) return room.advanceRemainingMs ?? 0
-  if (room.advanceAt == null) return null
-  return Math.max(0, room.advanceAt - now)
+  const answerLeft = room.advancePaused
+    ? room.advanceRemainingMs ?? 0
+    : room.advanceAt == null
+      ? null
+      : Math.max(0, room.advanceAt - now)
+  if (answerLeft == null) return null
+  return answerLeft + READY_DURATION_MS
 }
 
 function readSettingDuration(value: number, min: number, max: number, label: string): number {
