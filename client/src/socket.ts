@@ -1,5 +1,15 @@
-import type { Ack, HostSession, RoomSnapshot } from "@shared/types"
+import { DIFFICULTY_BANDS, type Ack, type ClientToServerEvents, type HostSession, type RoomSettings, type RoomSnapshot } from "@shared/types"
 import type { ClientMessage } from "@shared/wire"
+
+type PayloadMessage = Extract<ClientMessage, { payload: unknown }>
+type PayloadEvent = PayloadMessage["event"]
+type PayloadOf<E extends PayloadEvent> = Extract<PayloadMessage, { event: E }>["payload"]
+type DeclaredPayload<E extends PayloadEvent> = Parameters<ClientToServerEvents[E]>[0]
+type PayloadsMatch = {
+  [E in PayloadEvent]: DeclaredPayload<E> extends PayloadOf<E> ? (PayloadOf<E> extends DeclaredPayload<E> ? true : false) : false
+}[PayloadEvent]
+const clientEventsMatchWire: PayloadsMatch = true
+void clientEventsMatchWire
 
 type StateListener = (snapshot: RoomSnapshot) => void
 type ConnectionListener = () => void
@@ -37,19 +47,11 @@ class QuizSocket {
     else this.disconnectListeners.delete(listener as ConnectionListener)
   }
 
-  emit(
-    event: string,
-    payloadOrAck?: object | ((res: Ack<never>) => void),
-    maybeAck?: (res: Ack<never>) => void,
-  ): void {
-    const ack: AckListener | undefined =
-      typeof maybeAck === "function"
-        ? (maybeAck as AckListener)
-        : typeof payloadOrAck === "function"
-          ? (payloadOrAck as AckListener)
-          : undefined
-    const payload = typeof payloadOrAck === "function" ? undefined : payloadOrAck
-    void this.dispatch(event, payload)
+  emit<E extends keyof ClientToServerEvents>(event: E, ...args: Parameters<ClientToServerEvents[E]>): void {
+    const last = args[args.length - 1]
+    const ack: AckListener | undefined = typeof last === "function" ? (last as AckListener) : undefined
+    const body = typeof last === "function" && args.length === 1 ? undefined : args[0]
+    void this.dispatch(event, body)
       .then((data) => ack?.({ ok: true, data }))
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : "Something went wrong"
@@ -59,12 +61,13 @@ class QuizSocket {
 
   private async dispatch(event: string, payload: unknown): Promise<unknown> {
     if (event === "host:create") return this.createHost()
-    if (event === "host:attach" || event === "player:join" || event === "player:attach") {
-      await this.ensure(codeFrom(payload))
+    const message = clientMessage(event, payload)
+    if (message.event === "host:attach" || message.event === "player:join" || message.event === "player:attach") {
+      await this.ensure(message.payload.code)
     } else if (this.ws?.readyState !== WebSocket.OPEN) {
       throw new Error("Reconnecting to the table")
     }
-    return this.rpc(event, payload)
+    return this.rpc(message)
   }
 
   private async createHost(): Promise<HostSession> {
@@ -83,7 +86,11 @@ class QuizSocket {
       throw new Error(message)
     }
     await this.ensure(body.code)
-    await this.rpc("host:attach", { code: body.code, hostToken: body.hostToken })
+    await this.rpc({
+      id: crypto.randomUUID(),
+      event: "host:attach",
+      payload: { code: body.code, hostToken: body.hostToken },
+    })
     return body
   }
 
@@ -160,17 +167,15 @@ class QuizSocket {
     }, 600)
   }
 
-  private rpc(event: string, payload?: unknown): Promise<unknown> {
+  private rpc(message: ClientMessage): Promise<unknown> {
     const ws = this.ws
     if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error("Reconnecting to the table"))
-    const id = crypto.randomUUID()
-    const message: ClientMessage = payload === undefined ? { id, event } as ClientMessage : { id, event, payload } as ClientMessage
     return new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => {
-        this.pending.delete(id)
+        this.pending.delete(message.id)
         reject(new Error("The table did not answer"))
       }, 8000)
-      this.pending.set(id, (res) => {
+      this.pending.set(message.id, (res) => {
         window.clearTimeout(timer)
         if (res.ok) resolve(res.data)
         else reject(new Error(res.error))
@@ -217,11 +222,67 @@ function socketUrl(code: string): string {
   return `${protocol}//${window.location.host}/ws/${code}`
 }
 
-function codeFrom(payload: unknown): string {
-  if (!isRecord(payload) || typeof payload.code !== "string" || payload.code.trim() === "") {
-    throw new Error("Room not found")
+function clientMessage(event: string, payload: unknown): ClientMessage {
+  const id = crypto.randomUUID()
+  switch (event) {
+    case "host:start":
+    case "host:next":
+    case "host:pause":
+    case "host:end":
+    case "host:reset":
+    case "player:lock":
+      return { id, event }
+    case "host:attach": {
+      if (!isCodeToken(payload)) throw new Error("Room not found")
+      return { id, event, payload }
+    }
+    case "player:join": {
+      if (!isCodeName(payload)) throw new Error("Room not found")
+      return { id, event, payload }
+    }
+    case "player:attach": {
+      if (!isPlayerAttach(payload)) throw new Error("Rejoin the room")
+      return { id, event, payload }
+    }
+    case "player:choose": {
+      if (!isRecord(payload) || typeof payload.choiceIndex !== "number") throw new Error("Something went wrong")
+      return { id, event, payload: { choiceIndex: payload.choiceIndex } }
+    }
+    case "host:settings": {
+      if (!isSettings(payload)) throw new Error("Something went wrong")
+      return { id, event, payload }
+    }
+    default:
+      throw new Error("Something went wrong")
   }
-  return payload.code
+}
+
+function isCodeToken(value: unknown): value is { code: string; hostToken: string } {
+  return isRecord(value) && typeof value.code === "string" && typeof value.hostToken === "string"
+}
+
+function isCodeName(value: unknown): value is { code: string; name: string } {
+  return isRecord(value) && typeof value.code === "string" && typeof value.name === "string"
+}
+
+function isPlayerAttach(value: unknown): value is { code: string; playerId: string; token: string } {
+  return (
+    isRecord(value) &&
+    typeof value.code === "string" &&
+    typeof value.playerId === "string" &&
+    typeof value.token === "string"
+  )
+}
+
+function isSettings(value: unknown): value is RoomSettings {
+  return (
+    isRecord(value) &&
+    typeof value.questionDurationMs === "number" &&
+    typeof value.revealDurationMs === "number" &&
+    typeof value.autoAdvance === "boolean" &&
+    typeof value.difficulty === "string" &&
+    DIFFICULTY_BANDS.some((band) => band === value.difficulty)
+  )
 }
 
 function isHostSession(value: unknown): value is HostSession {

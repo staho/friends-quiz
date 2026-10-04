@@ -258,9 +258,9 @@ export class RoomDurableObject extends DurableObject<Env> {
     const slot = difficultyForSlot(room.asked.length)
     const target = bounds ? Math.min(bounds.maxDifficulty, Math.max(bounds.minDifficulty, slot)) : slot
     const catalog = this.env.CATALOG.getByName("questions")
-    const dealt = await takeFromDeck(room, target, bounds, (excludeIds, difficulty, pickBounds) =>
-      catalog.pickRandom([...excludeIds], difficulty, pickBounds),
-    )
+    const dealt = await takeFromDeck(room, target, bounds, (excludeIds, difficulty, pickBounds) => {
+      return catalog.pickRandom([...excludeIds], difficulty, pickBounds) as Promise<Question | null>
+    })
     const picked = dealt.question
     if (!picked || picked.choices.length !== 4) return { room: dealt.room, question: null }
     const [first, second, third, fourth] = picked.choices

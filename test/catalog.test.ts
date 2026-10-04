@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { DatabaseSync } from "node:sqlite"
 import path from "node:path"
 import { describe, it } from "node:test"
@@ -28,20 +28,14 @@ function openMemory(): DatabaseSync {
   return db
 }
 
-const MIGRATION_NAMES = [
-  "0001_questions.sql",
-  "0002_seed.sql",
-  "0003_question_stats.sql",
-  "0004_categories.sql",
-  "0005_geography.sql",
-  "0006_science.sql",
-  "0007_common.sql",
-  "0008_movies.sql",
-  "0009_history.sql",
-]
+function migrationNames(): string[] {
+  return readdirSync(path.join(root, "migrations"))
+    .filter((name) => name.endsWith(".sql"))
+    .sort()
+}
 
 function migrationFiles(): CatalogMigration[] {
-  return MIGRATION_NAMES.map((name) => ({
+  return migrationNames().map((name) => ({
     name,
     sql: readFileSync(path.join(root, "migrations", name), "utf8"),
   }))
@@ -105,6 +99,12 @@ function countRows(db: DatabaseSync, table: string): number {
 }
 
 describe("question catalog", () => {
+  it("lists every migration file for the worker", () => {
+    const generated = readFileSync(path.join(root, "worker/catalog-migrations.ts"), "utf8")
+    const listed = [...generated.matchAll(/name: "([^"]+\.sql)"/g)].map((match) => match[1])
+    assert.deepEqual(listed, migrationNames())
+  })
+
   it("loads the seeded bank", async () => {
     const pack = await listQuestions(openSeeded())
     assert.ok(pack.length >= QUESTIONS_PER_ROUND)
@@ -177,7 +177,7 @@ describe("question catalog", () => {
     const applied = db.prepare("SELECT name FROM schema_migrations ORDER BY name").all() as { name: string }[]
     assert.deepEqual(
       applied.map((row) => row.name),
-      MIGRATION_NAMES,
+      migrationNames(),
     )
   })
 
