@@ -89,6 +89,25 @@ button { touch-action: manipulation; }
 
 .stage-bar .eyebrow { margin: 0; }
 
+.stage-tools {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.sound-btn {
+  padding: 8px 16px;
+  font-size: 0.95rem;
+}
+
+.phone-tools {
+  display: flex;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  margin-bottom: 8px;
+}
+
 .fullscreen-control {
   display: flex;
   flex-direction: column;
