@@ -127,9 +127,12 @@ class QuizSocket {
       ws.addEventListener(
         "error",
         () => {
-          if (settled || this.ws !== ws) return
-          settled = true
-          reject(new Error("Could not reach the table"))
+          if (this.ws !== ws) return
+          if (!settled) {
+            settled = true
+            reject(new Error("Could not reach the table"))
+          }
+          ws.close()
         },
         { once: true },
       )

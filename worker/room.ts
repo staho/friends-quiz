@@ -13,6 +13,7 @@ import {
   joinPlayer,
   lockAnswer,
   nextQuestion,
+  normalizeName,
   reconnectPlayer,
   resetRound,
   restoreRoom,
@@ -23,6 +24,7 @@ import {
   submitChoice,
   toggleAdvancePause,
   updateSettings,
+  withLiveConnections,
   type Question,
   type Room,
 } from "../server/game.ts"
@@ -87,23 +89,20 @@ export class RoomDurableObject extends DurableObject<Env> {
   }
 
   async webSocketClose(ws: WebSocket): Promise<void> {
-    const seat = readSeat(ws)
-    if (!seat || seat.role !== "player") return
-    const stillHere = this.ctx.getWebSockets().some((other) => {
-      if (other === ws) return false
-      const otherSeat = readSeat(other)
-      return otherSeat?.role === "player" && otherSeat.playerId === seat.playerId
-    })
-    if (stillHere) return
-    const room = this.readRoom()
-    if (!room) return
-    const now = Date.now()
-    const next = applyTick(setPlayerConnected(room, seat.playerId, false), now)
-    await this.commit(next, now)
+    await this.releaseSeat(ws)
   }
 
-  async webSocketError(_ws: WebSocket, error: unknown): Promise<void> {
+  async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
     console.error(error)
+    try {
+      await this.releaseSeat(ws)
+    } finally {
+      try {
+        ws.close()
+      } catch {
+        // The runtime may already have closed this socket.
+      }
+    }
   }
 
   async alarm(): Promise<void> {
@@ -189,17 +188,20 @@ export class RoomDurableObject extends DurableObject<Env> {
     if (!room) throw new GameError("Room not found")
     const code = payload.code.trim().toUpperCase()
     if (code !== room.code) throw new GameError("Room not found")
+    const name = normalizeName(payload.name)
+    const seated = this.sessionForSeat(ws, room, name)
+    if (seated) return seated
     const now = Date.now()
-    const ticked = applyTick(room, now)
+    const present = withLiveConnections(applyTick(room, now), this.openPlayerIds(ws))
     let joined: ReturnType<typeof joinPlayer>
     try {
-      joined = joinPlayer(ticked, {
+      joined = joinPlayer(present, {
         id: crypto.randomUUID(),
-        name: payload.name,
+        name,
         token: newToken(),
       })
     } catch (error) {
-      if (ticked !== room) await this.commit(ticked, now)
+      if (present !== room) await this.commit(present, now)
       throw error
     }
     const next = applyTick(joined.room, now)
@@ -319,16 +321,51 @@ export class RoomDurableObject extends DurableObject<Env> {
 
   private broadcast(room: Room, now: number): void {
     for (const ws of this.ctx.getWebSockets()) {
-      const seat = readSeat(ws)
-      if (!seat) continue
-      const snapshot = snapshotFor(
-        room,
-        seat.role === "player" ? { role: "player", playerId: seat.playerId } : { role: "host" },
-        now,
-        [],
-      )
-      ws.send(JSON.stringify({ event: "state", data: snapshot }))
+      try {
+        const seat = readSeat(ws)
+        if (!seat) continue
+        const snapshot = snapshotFor(
+          room,
+          seat.role === "player" ? { role: "player", playerId: seat.playerId } : { role: "host" },
+          now,
+          [],
+        )
+        ws.send(JSON.stringify({ event: "state", data: snapshot }))
+      } catch (error) {
+        console.error(error)
+      }
     }
+  }
+
+  private async releaseSeat(ws: WebSocket): Promise<void> {
+    const seat = readSeat(ws)
+    if (!seat || seat.role !== "player") return
+    if (this.openPlayerIds(ws).has(seat.playerId)) return
+    const room = this.readRoom()
+    if (!room) return
+    const player = room.players.find((item) => item.id === seat.playerId)
+    if (!player?.connected) return
+    const now = Date.now()
+    const next = applyTick(setPlayerConnected(room, seat.playerId, false), now)
+    await this.commit(next, now)
+  }
+
+  private openPlayerIds(except?: WebSocket): Set<string> {
+    const ids = new Set<string>()
+    for (const socket of this.ctx.getWebSockets()) {
+      if (socket === except || socket.readyState !== WebSocket.OPEN) continue
+      const seat = readSeat(socket)
+      if (seat?.role === "player") ids.add(seat.playerId)
+    }
+    return ids
+  }
+
+  private sessionForSeat(ws: WebSocket, room: Room, name: string): PlayerSession | null {
+    const seat = readSeat(ws)
+    if (seat?.role !== "player") return null
+    const player = room.players.find((item) => item.id === seat.playerId)
+    if (!player || player.name.toLowerCase() !== name.toLowerCase()) return null
+    return { code: room.code, playerId: player.id, token: player.token, name: player.name }
   }
 
   private requireHost(ws: WebSocket): void {

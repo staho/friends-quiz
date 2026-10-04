@@ -13,6 +13,7 @@ import {
   endGame,
   joinPlayer,
   lockAnswer,
+  withLiveConnections,
   nextQuestion,
   randomQuestionPolicy,
   resetRound,
@@ -102,6 +103,25 @@ describe("joining", () => {
     assert.equal(rejoined.player.id, "p1")
     assert.equal(rejoined.player.token, "new")
     assert.equal(rejoined.player.connected, true)
+  })
+
+  it("lets a player reclaim a name when no live socket holds it", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = addPlayer(room, "p2", "Bea")
+    const present = withLiveConnections(room, new Set(["p2"]))
+    assert.equal(present.players.find((player) => player.id === "p1")?.connected, false)
+    assert.equal(present.players.find((player) => player.id === "p2")?.connected, true)
+    const rejoined = joinPlayer(present, { id: "p3", name: "Ada", token: "new" })
+    assert.equal(rejoined.player.id, "p1")
+    assert.equal(rejoined.player.token, "new")
+    assert.equal(rejoined.player.connected, true)
+  })
+
+  it("keeps a name taken while that player still has a live socket", () => {
+    const room = addPlayer(roomWith(), "p1", "Ada")
+    const present = withLiveConnections(room, new Set(["p1"]))
+    assert.equal(present, room)
+    assert.throws(() => joinPlayer(present, { id: "p2", name: "ada", token: "new" }), /taken/)
   })
 
   it("refuses a new player after the round starts", () => {
