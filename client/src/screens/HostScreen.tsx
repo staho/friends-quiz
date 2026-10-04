@@ -13,10 +13,12 @@ import {
   type RoomSettings,
   type RoomSnapshot,
 } from "@shared/types"
+import { MuteButton } from "../MuteButton"
 import { AnswerGrid, TimerBar, formatCode, formatLockSeconds, joinOrigin, joinUrl } from "../components"
 import { request, socket } from "../socket"
 import { useCountdown } from "../useCountdown"
 import { useRoom } from "../useRoom"
+import { useHostSounds } from "../useSounds"
 
 const HOST_KEY = "friends-quiz-host"
 
@@ -56,9 +58,13 @@ export function HostScreen() {
 
   return (
     <main className="stage tv">
+      <HostSoundTrack snapshot={snapshot} />
       <div className="stage-bar">
         <p className="eyebrow">Friends quiz</p>
-        <FullScreenToggle />
+        <div className="stage-tools">
+          <MuteButton />
+          <FullScreenToggle />
+        </div>
       </div>
       {!connected && <p className="banner">Reconnecting to the table…</p>}
       {error && <p className="banner">{error}</p>}
@@ -593,6 +599,11 @@ function FullScreenToggle() {
       {unavailable && <p className="fullscreen-hint">Full screen isn't available in this browser</p>}
     </div>
   )
+}
+
+function HostSoundTrack({ snapshot }: { snapshot: RoomSnapshot | null }) {
+  useHostSounds(snapshot)
+  return null
 }
 
 function openOrAttach(): Promise<void> {

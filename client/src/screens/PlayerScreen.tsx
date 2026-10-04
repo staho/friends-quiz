@@ -2,8 +2,10 @@ import { useEffect, useState, type FormEvent } from "react"
 import { useCountdown } from "../useCountdown"
 import type { PlayerSession, RevealResult, RoomSnapshot } from "@shared/types"
 import { AnswerGrid, formatCode, formatLockSeconds } from "../components"
+import { MuteButton } from "../MuteButton"
 import { request, socket } from "../socket"
 import { useRoom } from "../useRoom"
+import { usePlayerSounds } from "../useSounds"
 
 const PLAYER_KEY = "friends-quiz-player"
 
@@ -67,6 +69,7 @@ export function PlayerScreen() {
   }
 
   const playing = snapshot?.you.role === "player" ? snapshot : null
+  usePlayerSounds(playing)
 
   return (
     <main className="stage phone">
@@ -75,7 +78,12 @@ export function PlayerScreen() {
       {restoring ? (
         <p className="waiting">Finding your seat…</p>
       ) : playing ? (
-        <Play snapshot={playing} onError={setError} />
+        <>
+          <div className="phone-tools">
+            <MuteButton />
+          </div>
+          <Play snapshot={playing} onError={setError} />
+        </>
       ) : (
         <form
           className="join"
