@@ -84,6 +84,10 @@ export function joinOrigin(lanAddresses: string[]): string {
   return window.location.origin
 }
 
+export function joinUrl(origin: string, code: string): string {
+  return `${origin}/?code=${encodeURIComponent(code)}`
+}
+
 export function formatCode(code: string): string {
   return code.split("").join(" ")
 }

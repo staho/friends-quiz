@@ -84,6 +84,38 @@ button { touch-action: manipulation; }
   word-break: break-all;
 }
 
+.join-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.join-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-width: 0;
+}
+
+.join-copy > * { margin: 0; }
+
+.join-qr {
+  flex: 0 0 auto;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 10px 24px rgba(26, 18, 12, 0.08);
+  line-height: 0;
+}
+
+.join-qr svg {
+  display: block;
+  width: 220px;
+  height: 220px;
+}
+
 .prompt {
   margin: 0;
   font-family: Georgia, "Iowan Old Style", Palatino, serif;
@@ -469,6 +501,10 @@ button { touch-action: manipulation; }
 .phone-wait .answer-grid { margin-top: 8px; }
 
 @media (max-width: 720px) {
+  .join-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
   .stage.tv {
     padding:
       18px
