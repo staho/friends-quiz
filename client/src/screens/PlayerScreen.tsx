@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react"
 import { useCountdown } from "../useCountdown"
-import type { PlayerSession, RoomSnapshot } from "@shared/types"
-import { AnswerGrid, formatCode } from "../components"
+import type { PlayerSession, RevealResult, RoomSnapshot } from "@shared/types"
+import { AnswerGrid, formatCode, formatLockSeconds } from "../components"
 import { request, socket } from "../socket"
 import { useRoom } from "../useRoom"
 
@@ -221,6 +221,7 @@ function Play({
         <p className="score-line">
           Your score <strong>{you.score}</strong>
         </p>
+        {mine && <p className="hint">{paceHint(mine)}</p>}
       </section>
     )
   }
@@ -254,6 +255,13 @@ function GetReady({ ready }: { ready: NonNullable<RoomSnapshot["ready"]> }) {
       </p>
     </section>
   )
+}
+
+function paceHint(result: RevealResult): string {
+  if (result.choiceIndex == null || result.locked !== true || typeof result.elapsedMs !== "number") {
+    return "You didn't lock in, so the question used the full timer."
+  }
+  return `You locked in at ${formatLockSeconds(result.elapsedMs)}.`
 }
 
 function leave(): void {

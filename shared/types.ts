@@ -56,6 +56,8 @@ export interface RevealResult {
   correct: boolean
   points: number
   score: number
+  elapsedMs: number
+  locked: boolean
 }
 
 export interface PublicReveal {

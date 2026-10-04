@@ -9,10 +9,11 @@ import {
   type DifficultyBand,
   type HostSession,
   type PublicPlayer,
+  type RevealResult,
   type RoomSettings,
   type RoomSnapshot,
 } from "@shared/types"
-import { AnswerGrid, TimerBar, formatCode, joinOrigin, joinUrl } from "../components"
+import { AnswerGrid, TimerBar, formatCode, formatLockSeconds, joinOrigin, joinUrl } from "../components"
 import { request, socket } from "../socket"
 import { useCountdown } from "../useCountdown"
 import { useRoom } from "../useRoom"
@@ -282,7 +283,8 @@ function QuestionBoard({
   const left = useCountdown(question?.remainingMs ?? null, question != null)
   if (!question) return null
   const active = snapshot.players.filter((player) => player.connected)
-  const locked = active.filter((player) => player.locked).length
+  const locked = active.filter((player) => player.locked)
+  const waiting = active.filter((player) => !player.locked)
   return (
     <section className="board question">
       <p className="kicker">
@@ -292,7 +294,8 @@ function QuestionBoard({
       <TimerBar leftMs={left} durationMs={question.durationMs} />
       <AnswerGrid choices={question.choices} selected={null} />
       <p className="hint">
-        {locked} of {active.length} locked in
+        {locked.length} of {active.length} locked in
+        {waiting.length > 0 ? ` · waiting on ${waiting.map((player) => player.name).join(", ")}` : ""}
       </p>
       <div className="controls">
         <button type="button" className="btn ghost" disabled={busy} onClick={onEnd}>
@@ -468,6 +471,14 @@ function PlayerStrip({ players }: { players: PublicPlayer[] }) {
   )
 }
 
+function resultPace(result: RevealResult): string {
+  if (result.choiceIndex == null) return "no answer"
+  const outcome = result.correct ? `+${result.points}` : "miss"
+  if (typeof result.locked !== "boolean" || typeof result.elapsedMs !== "number") return outcome
+  if (!result.locked) return `${outcome} · didn't lock`
+  return `${outcome} · ${formatLockSeconds(result.elapsedMs)}`
+}
+
 function ScoreList({ snapshot }: { snapshot: RoomSnapshot }) {
   const results = [...(snapshot.reveal?.results ?? [])].sort(
     (a, b) => b.score - a.score || a.name.localeCompare(b.name),
@@ -477,9 +488,7 @@ function ScoreList({ snapshot }: { snapshot: RoomSnapshot }) {
       {results.map((result) => (
         <li key={result.playerId}>
           <span className="score-name">{result.name}</span>
-          <span className={result.correct ? "gain" : "miss"}>
-            {result.choiceIndex == null ? "no answer" : result.correct ? `+${result.points}` : "miss"}
-          </span>
+          <span className={result.correct ? "gain" : "miss"}>{resultPace(result)}</span>
           <strong>{result.score}</strong>
         </li>
       ))}
