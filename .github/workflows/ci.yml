@@ -35,6 +35,28 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
+          node --input-type=module <<'EOF'
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID
+          const token = process.env.CLOUDFLARE_API_TOKEN
+          const url = `https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/friends-quiz/subdomain`
+          const headers = {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "Cloudflare-Workers-Script-Api-Date": "2025-08-01",
+          }
+          const current = await fetch(url, { headers })
+          const body = await current.json()
+          const enabled = body?.result?.enabled === true
+          const updated = await fetch(url, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ enabled, previews_enabled: true }),
+          })
+          if (!updated.ok) {
+            console.error(await updated.text())
+            process.exit(1)
+          }
+          EOF
           npx wrangler preview --name "pr-${{ github.event.pull_request.number }}" --json --message "Pull request #${{ github.event.pull_request.number }}" > preview.json
           node --input-type=module <<'EOF'
           import { readFileSync, appendFileSync } from "node:fs"
