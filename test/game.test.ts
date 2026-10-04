@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { BASE_POINTS, MAX_SPEED_BONUS, NEXT_TIME_DEFAULT_MS, type RoomSettings } from "../shared/types.ts"
+import { BASE_POINTS, MAX_SPEED_BONUS, NEXT_TIME_DEFAULT_MS, READY_DURATION_MS, type RoomSettings } from "../shared/types.ts"
 import {
   GameError,
   advanceDue,
@@ -49,6 +49,18 @@ function roomWith(): Room {
 
 function addPlayer(room: Room, id: string, name: string): Room {
   return joinPlayer(room, { id, name, token: `token-${id}` }).room
+}
+
+function playing(room: Room, item: Question, now: number, roundId?: string): Room {
+  const ready =
+    roundId === undefined
+      ? startGame(room, item, now - READY_DURATION_MS)
+      : startGame(room, item, now - READY_DURATION_MS, roundId)
+  return applyTick(ready, now)
+}
+
+function openedNext(room: Room, item: Question, now: number): Room {
+  return applyTick(nextQuestion(room, item, now - READY_DURATION_MS), now)
 }
 
 function settings(overrides: Partial<RoomSettings> = {}): RoomSettings {
@@ -106,7 +118,7 @@ describe("joining", () => {
 
   it("refuses a new player after the round starts", () => {
     let room = addPlayer(roomWith(), "p1", "Ada")
-    room = startGame(room, question("a", 0), 0)
+    room = playing(room, question("a", 0), 0)
     assert.throws(() => addPlayer(room, "p2", "Bea"), /already started/)
   })
 })
@@ -115,7 +127,7 @@ describe("answers", () => {
   it("keeps one answer per player and lets them change it until lock", () => {
     let room = addPlayer(roomWith(), "p1", "Ada")
     room = addPlayer(room, "p2", "Bea")
-    room = startGame(room, question("a", 0), 1_000)
+    room = playing(room, question("a", 0), 1_000)
     room = submitChoice(room, "p1", 1, 1_200)
     room = submitChoice(room, "p1", 0, 1_400)
     room = submitChoice(room, "p2", 3, 1_500)
@@ -128,13 +140,13 @@ describe("answers", () => {
 
   it("ignores an answer after the timer", () => {
     let room = addPlayer(roomWith(), "p1", "Ada")
-    room = startGame(room, question("a", 0), 0)
+    room = playing(room, question("a", 0), 0)
     assert.throws(() => submitChoice(room, "p1", 0, duration), /Time is up/)
   })
 
   it("reveals when the timer expires and scores an unlocked pick slowly", () => {
     let room = addPlayer(roomWith(), "p1", "Ada")
-    room = startGame(room, question("a", 0), 0)
+    room = playing(room, question("a", 0), 0)
     room = submitChoice(room, "p1", 0, 100)
     room = applyTick(room, duration)
     assert.equal(room.phase, "reveal")
@@ -144,7 +156,7 @@ describe("answers", () => {
 
   it("reveals early when every connected player has locked", () => {
     let room = addPlayer(roomWith(), "p1", "Ada")
-    room = startGame(room, question("a", 0), 0)
+    room = playing(room, question("a", 0), 0)
     room = submitChoice(room, "p1", 0, 10)
     room = lockAnswer(room, "p1", 0)
     room = applyTick(room, 0)
@@ -154,7 +166,7 @@ describe("answers", () => {
 
   it("scores a wrong answer as zero", () => {
     let room = addPlayer(roomWith(), "p1", "Ada")
-    room = startGame(room, question("a", 1), 0)
+    room = playing(room, question("a", 1), 0)
     room = submitChoice(room, "p1", 0, 10)
     room = lockAnswer(room, "p1", 10)
     room = applyTick(room, 10)
@@ -164,7 +176,7 @@ describe("answers", () => {
 
   it("hides the correct answer until reveal", () => {
     let room = addPlayer(roomWith(), "p1", "Ada")
-    room = startGame(room, question("a", 2), 0)
+    room = playing(room, question("a", 2), 0)
     const during = snapshotFor(room, { role: "player", playerId: "p1" }, 0, [])
     assert.equal(during.reveal, null)
     assert.equal(during.question?.prompt, "Prompt a")
@@ -186,7 +198,7 @@ describe("host settings", () => {
     assert.equal(room.difficulty, "mixed")
     assert.equal(room.revealDurationMs, NEXT_TIME_DEFAULT_MS)
     assert.equal(difficultyBounds(room.difficulty), null)
-    room = startGame(room, question("a", 0), 0)
+    room = playing(room, question("a", 0), 0)
     room = applyTick(room, duration)
     assert.equal(room.advanceAt, duration + NEXT_TIME_DEFAULT_MS)
     const snap = snapshotFor(room, { role: "host" }, duration, [])
@@ -210,7 +222,7 @@ describe("host settings", () => {
 
   it("reveals when a shorter answer time is already past", () => {
     let room = addPlayer(roomWith(), "p1", "Ada")
-    room = startGame(room, question("a", 0), 0)
+    room = playing(room, question("a", 0), 0)
     room = updateSettings(room, settings({ questionDurationMs: 5_000 }), 6_000)
     room = applyTick(room, 6_000)
     assert.equal(room.phase, "reveal")
@@ -218,7 +230,7 @@ describe("host settings", () => {
 
   it("counts down to the next question only when automatic advance is on", () => {
     let room = addPlayer(updateSettings(roomWith(), settings({ autoAdvance: true, revealDurationMs: 8_000 }), 0), "p1", "Ada")
-    room = startGame(room, question("a", 0), 0)
+    room = playing(room, question("a", 0), 0)
     room = applyTick(room, duration)
     assert.equal(room.advanceAt, duration + 8_000)
     assert.equal(advanceDue(room, duration + 7_999), false)
@@ -228,7 +240,7 @@ describe("host settings", () => {
     assert.equal(snap.revealRemainingMs, 7_000)
 
     let manual = addPlayer(updateSettings(roomWith(), settings({ autoAdvance: false }), 0), "p1", "Ada")
-    manual = startGame(manual, question("a", 0), 0)
+    manual = playing(manual, question("a", 0), 0)
     manual = applyTick(manual, duration)
     assert.equal(manual.advanceAt, null)
     assert.equal(advanceDue(manual, duration + 60_000), false)
@@ -238,7 +250,7 @@ describe("host settings", () => {
 
   it("restarts the wait when the delay changes and clears it when automatic next is turned off", () => {
     let room = addPlayer(updateSettings(roomWith(), settings({ autoAdvance: true, revealDurationMs: 8_000 }), 0), "p1", "Ada")
-    room = startGame(room, question("a", 0), 0)
+    room = playing(room, question("a", 0), 0)
     room = applyTick(room, duration)
     const started = room.advanceAt
     room = updateSettings(room, settings({ autoAdvance: true, difficulty: "1-2" }), duration + 500)
@@ -253,7 +265,7 @@ describe("host settings", () => {
 
   it("holds the countdown while the host pauses and resumes the remaining wait", () => {
     let room = addPlayer(roomWith(), "p1", "Ada")
-    room = startGame(room, question("a", 0), 0)
+    room = playing(room, question("a", 0), 0)
     room = applyTick(room, duration)
     assert.equal(room.advanceAt, duration + NEXT_TIME_DEFAULT_MS)
     assert.equal(room.advancePaused, false)
@@ -278,9 +290,9 @@ describe("host settings", () => {
 
   it("refuses to pause before the answer is showing or when automatic next is off", () => {
     const room = addPlayer(roomWith(), "p1", "Ada")
-    assert.throws(() => toggleAdvancePause(startGame(room, question("a", 0), 0), 1), GameError)
+    assert.throws(() => toggleAdvancePause(playing(room, question("a", 0), 0), 1), GameError)
     let manual = addPlayer(updateSettings(roomWith(), settings({ autoAdvance: false }), 0), "p1", "Ada")
-    manual = startGame(manual, question("a", 0), 0)
+    manual = playing(manual, question("a", 0), 0)
     manual = applyTick(manual, duration)
     assert.throws(() => toggleAdvancePause(manual, duration), GameError)
   })
@@ -292,7 +304,7 @@ describe("host settings", () => {
       0,
     )
     room = addPlayer(room, "p1", "Ada")
-    room = startGame(room, question("a", 0), 0)
+    room = playing(room, question("a", 0), 0)
     room = resetRound(room)
     assert.equal(room.phase, "lobby")
     assert.equal(room.questionDurationMs, 12_000)
@@ -308,6 +320,7 @@ describe("host settings", () => {
     assert.equal(restored.difficulty, "mixed")
     assert.equal(restored.revealDurationMs, NEXT_TIME_DEFAULT_MS)
     assert.equal(restored.advanceAt, null)
+    assert.equal(restored.readyUntil, null)
     assert.equal(restored.questionDurationMs, duration)
   })
 })
@@ -324,14 +337,14 @@ describe("difficulty ramp", () => {
 describe("round flow", () => {
   it("moves to the next question and then finishes", () => {
     let room = addPlayer(roomWith(), "p1", "Ada")
-    room = startGame(room, question("a", 0), 0)
+    room = playing(room, question("a", 0), 0)
     room = submitChoice(room, "p1", 0, 0)
     room = lockAnswer(room, "p1", 0)
     room = applyTick(room, 0)
     assert.equal(room.history.length, 1)
     assert.equal(room.history[0]?.questionId, "a")
     assert.equal(room.history[0]?.correct, true)
-    room = nextQuestion(room, question("b", 1), 5_000)
+    room = openedNext(room, question("b", 1), 5_000)
     assert.equal(room.phase, "question")
     assert.equal(room.questionIndex, 1)
     assert.equal(room.reveal, null)
@@ -346,7 +359,7 @@ describe("round flow", () => {
 
   it("ends early without scoring the open question", () => {
     let room = addPlayer(roomWith(), "p1", "Ada")
-    room = startGame(room, question("a", 0), 0)
+    room = playing(room, question("a", 0), 0)
     room = submitChoice(room, "p1", 0, 10)
     room = endGame(room)
     assert.equal(room.phase, "finished")
@@ -359,7 +372,7 @@ describe("round flow", () => {
     let room = addPlayer(roomWith(), "p1", "Ada")
     room = addPlayer(room, "p2", "Bea")
     room = addPlayer(room, "p3", "Cam")
-    room = startGame(room, question("a", 0), 0, "round-1")
+    room = playing(room, question("a", 0), 0, "round-1")
     room = submitChoice(room, "p1", 0, 10)
     room = lockAnswer(room, "p1", 10)
     room = submitChoice(room, "p3", 1, 20)
@@ -387,7 +400,7 @@ describe("round flow", () => {
 
   it("starts a fresh lobby on reset", () => {
     let room = addPlayer(roomWith(), "p1", "Ada")
-    room = startGame(room, question("a", 0), 0)
+    room = playing(room, question("a", 0), 0)
     room = applyTick(room, duration)
     room = resetRound(room)
     assert.equal(room.phase, "lobby")
@@ -399,11 +412,99 @@ describe("round flow", () => {
 
   it("finishes when the round already has its question limit", () => {
     let room = addPlayer(createRoom({ code: "QUIZ", hostToken: "host", questionLimit: 1, questionDurationMs: duration }), "p1", "Ada")
-    room = startGame(room, question("a", 0), 0)
+    room = playing(room, question("a", 0), 0)
     room = applyTick(room, duration)
     room = nextQuestion(room, question("b", 1), duration)
     assert.equal(room.phase, "finished")
     assert.equal(room.asked.length, 1)
+  })
+})
+
+describe("get ready", () => {
+  it("hides the question, blocks answers, and opens on a full clock", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = startGame(room, question("a", 2), 1_000)
+    assert.equal(room.phase, "ready")
+    assert.equal(room.questionStartedAt, null)
+    assert.equal(room.readyUntil, 1_000 + READY_DURATION_MS)
+    assert.equal(alarmAt(room), 1_000 + READY_DURATION_MS)
+    assert.throws(() => submitChoice(room, "p1", 0, 1_100), /No question is open/)
+    assert.throws(() => lockAnswer(room, "p1", 1_100), /No question is open/)
+
+    const during = snapshotFor(room, { role: "player", playerId: "p1" }, 1_500, [])
+    assert.equal(during.phase, "ready")
+    assert.equal(during.question, null)
+    assert.equal(during.reveal, null)
+    assert.equal(during.ready?.index, 0)
+    assert.equal(during.ready?.total, 10)
+    assert.equal(during.ready?.durationMs, READY_DURATION_MS)
+    assert.equal(during.ready?.remainingMs, READY_DURATION_MS - 500)
+
+    assert.equal(applyTick(room, 1_000 + READY_DURATION_MS - 1).phase, "ready")
+    room = applyTick(room, 1_000 + READY_DURATION_MS)
+    assert.equal(room.phase, "question")
+    assert.equal(room.questionStartedAt, 1_000 + READY_DURATION_MS)
+    assert.equal(room.readyUntil, null)
+    const open = snapshotFor(room, { role: "host" }, 1_000 + READY_DURATION_MS, [])
+    assert.equal(open.ready, null)
+    assert.equal(open.question?.prompt, "Prompt a")
+    assert.equal(open.question?.remainingMs, duration)
+    assert.equal("correctIndex" in (open.question ?? {}), false)
+  })
+
+  it("counts down again before the next question", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = playing(room, question("a", 0), 0)
+    room = submitChoice(room, "p1", 0, 0)
+    room = lockAnswer(room, "p1", 0)
+    room = applyTick(room, 0)
+    room = nextQuestion(room, question("b", 1), 5_000)
+    assert.equal(room.phase, "ready")
+    assert.equal(room.questionIndex, 1)
+    assert.equal(room.reveal, null)
+    assert.equal(room.history.length, 1)
+    assert.equal(room.readyUntil, 5_000 + READY_DURATION_MS)
+    const snap = snapshotFor(room, { role: "host" }, 5_000, [])
+    assert.equal(snap.question, null)
+    assert.equal(snap.ready?.index, 1)
+    assert.equal(snap.ready?.remainingMs, READY_DURATION_MS)
+    room = applyTick(room, 5_000 + READY_DURATION_MS)
+    assert.equal(room.phase, "question")
+    assert.equal(room.questionStartedAt, 5_000 + READY_DURATION_MS)
+    assert.equal(snapshotFor(room, { role: "host" }, 5_000 + READY_DURATION_MS, []).question?.prompt, "Prompt b")
+  })
+
+  it("ends during get ready without scoring", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = startGame(room, question("a", 0), 0)
+    room = endGame(room)
+    assert.equal(room.phase, "finished")
+    assert.equal(room.readyUntil, null)
+    assert.equal(room.players[0]?.score, 0)
+    assert.equal(room.history.length, 0)
+    assert.equal(room.pendingPlays.length, 0)
+  })
+
+  it("restores a get-ready room and opens it when the countdown is over", () => {
+    const restored = restoreRoom({
+      code: "QUIZ",
+      hostToken: "host",
+      players: [{ id: "p1", name: "Ada", score: 0, connected: true, token: "t" }],
+      asked: [question("a", 0)],
+      questionIndex: 0,
+      questionLimit: 10,
+      phase: "ready",
+      readyUntil: 4_000,
+      questionDurationMs: duration,
+      answers: {},
+    })
+    assert.equal(restored.phase, "ready")
+    assert.equal(restored.readyUntil, 4_000)
+    assert.equal(applyTick(restored, 3_999).phase, "ready")
+    const opened = applyTick(restored, 4_000)
+    assert.equal(opened.phase, "question")
+    assert.equal(opened.questionStartedAt, 4_000)
+    assert.equal(opened.readyUntil, null)
   })
 })
 
@@ -444,6 +545,16 @@ describe("question policy", () => {
     assert.equal(room.history.length, 0)
     assert.equal(room.questionLimit, 2)
     assert.equal(room.roundId, null)
+    assert.equal(room.readyUntil, null)
     assert.deepEqual(room.pendingPlays, [])
+    const stuck = restoreRoom({
+      code: "QUIZ",
+      hostToken: "host",
+      phase: "ready",
+      asked: [question("a", 0)],
+      questionIndex: 0,
+    })
+    assert.equal(stuck.readyUntil, 0)
+    assert.equal(applyTick(stuck, 0).phase, "question")
   })
 })

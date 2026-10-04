@@ -7,6 +7,7 @@ export const ANSWER_TIME_MAX_MS = 120_000
 export const NEXT_TIME_MIN_MS = 2_000
 export const NEXT_TIME_MAX_MS = 30_000
 export const NEXT_TIME_DEFAULT_MS = 8_000
+export const READY_DURATION_MS = 3_000
 
 export const DIFFICULTY_BANDS = ["mixed", "1-2", "2-4", "4-5"] as const
 export type DifficultyBand = (typeof DIFFICULTY_BANDS)[number]
@@ -18,7 +19,7 @@ export const CHOICES = [
   { key: "D", color: "#2f9e5f", ink: "#f3fff7" },
 ] as const
 
-export type Phase = "lobby" | "question" | "reveal" | "finished"
+export type Phase = "lobby" | "ready" | "question" | "reveal" | "finished"
 
 export type ChoiceIndex = 0 | 1 | 2 | 3
 
@@ -29,6 +30,13 @@ export interface PublicPlayer {
   connected: boolean
   picked: boolean
   locked: boolean
+}
+
+export interface PublicReady {
+  index: number
+  total: number
+  remainingMs: number
+  durationMs: number
 }
 
 export interface PublicQuestion {
@@ -82,6 +90,7 @@ export interface RoomSnapshot {
   phase: Phase
   players: PublicPlayer[]
   question: PublicQuestion | null
+  ready: PublicReady | null
   reveal: PublicReveal | null
   you: PlayerView | HostView
   lanAddresses: string[]

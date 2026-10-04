@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react"
+import { useCountdown } from "../useCountdown"
 import type { PlayerSession, RoomSnapshot } from "@shared/types"
 import { AnswerGrid, formatCode } from "../components"
 import { request, socket } from "../socket"
@@ -165,6 +166,10 @@ function Play({
     )
   }
 
+  if (snapshot.phase === "ready" && snapshot.ready) {
+    return <GetReady ready={snapshot.ready} />
+  }
+
   if (snapshot.phase === "question" && snapshot.question) {
     const question = snapshot.question
     return (
@@ -231,6 +236,22 @@ function Play({
       <button type="button" className="btn ghost" onClick={leave}>
         Leave
       </button>
+    </section>
+  )
+}
+
+function GetReady({ ready }: { ready: NonNullable<RoomSnapshot["ready"]> }) {
+  const left = useCountdown(ready.remainingMs, true)
+  const count = Math.max(1, Math.ceil(left / 1000))
+  return (
+    <section className="phone-wait">
+      <p className="eyebrow">Get ready</p>
+      <h1 className="ready-count" aria-live="polite">
+        {count}
+      </h1>
+      <p className="hint">
+        Question {ready.index + 1} of {ready.total}
+      </p>
     </section>
   )
 }
