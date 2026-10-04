@@ -17,11 +17,11 @@ import {
   reconnectPlayer,
   resetRound,
   restoreRoom,
-  roundStats,
   setPlayerConnected,
   snapshotFor,
   startGame,
   submitChoice,
+  takeFromDeck,
   toggleAdvancePause,
   updateSettings,
   withLiveConnections,
@@ -111,8 +111,11 @@ export class RoomDurableObject extends DurableObject<Env> {
     const now = Date.now()
     let next = applyTick(room, now)
     if (advanceDue(next, now)) {
-      const question = next.asked.length >= next.questionLimit ? null : await this.dealOrFinish(next)
-      next = applyTick(nextQuestion(next, question, now), now)
+      const dealt =
+        next.asked.length >= next.questionLimit
+          ? { room: next, question: null }
+          : await this.dealOrFinish(next)
+      next = applyTick(nextQuestion(dealt.room, dealt.question, now), now)
     }
     if (next === room) {
       await this.arm(room)
@@ -127,13 +130,17 @@ export class RoomDurableObject extends DurableObject<Env> {
         return this.attachHost(ws, message.payload)
       case "host:start":
         this.requireHost(ws)
-        await this.mutate(async (room, now) => startGame(room, await this.deal(room), now))
+        await this.mutate(async (room, now) => {
+          const dealt = await this.deal(room)
+          return startGame(dealt.room, dealt.question, now)
+        })
         return null
       case "host:next":
         this.requireHost(ws)
         await this.mutate(async (room, now) => {
           if (room.asked.length >= room.questionLimit) return nextQuestion(room, null, now)
-          return nextQuestion(room, await this.dealOrFinish(room), now)
+          const dealt = await this.dealOrFinish(room)
+          return nextQuestion(dealt.room, dealt.question, now)
         })
         return null
       case "host:pause":
@@ -240,31 +247,36 @@ export class RoomDurableObject extends DurableObject<Env> {
     return { code, playerId: player.id, token: player.token, name: player.name }
   }
 
-  private async deal(room: Room): Promise<Question> {
-    const question = await this.dealOrFinish(room)
-    if (!question) throw new GameError("No questions available")
-    return question
+  private async deal(room: Room): Promise<{ room: Room; question: Question }> {
+    const dealt = await this.dealOrFinish(room)
+    if (!dealt.question) throw new GameError("No questions available")
+    return { room: dealt.room, question: dealt.question }
   }
 
-  private async dealOrFinish(room: Room): Promise<Question | null> {
+  private async dealOrFinish(room: Room): Promise<{ room: Room; question: Question | null }> {
     const bounds = difficultyBounds(room.difficulty)
     const slot = difficultyForSlot(room.asked.length)
     const target = bounds ? Math.min(bounds.maxDifficulty, Math.max(bounds.minDifficulty, slot)) : slot
-    const picked = await this.env.CATALOG.getByName("questions").pickRandom(
-      [...roundStats(room).askedIds],
-      target,
-      bounds ?? undefined,
+    const catalog = this.env.CATALOG.getByName("questions")
+    const dealt = await takeFromDeck(room, target, bounds, (excludeIds, difficulty, pickBounds) =>
+      catalog.pickRandom([...excludeIds], difficulty, pickBounds),
     )
-    if (!picked || picked.choices.length !== 4) return null
+    const picked = dealt.question
+    if (!picked || picked.choices.length !== 4) return { room: dealt.room, question: null }
     const [first, second, third, fourth] = picked.choices
-    if (first == null || second == null || third == null || fourth == null) return null
+    if (first == null || second == null || third == null || fourth == null) {
+      return { room: dealt.room, question: null }
+    }
     return {
-      id: picked.id,
-      prompt: picked.prompt,
-      choices: [first, second, third, fourth],
-      correctIndex: picked.correctIndex,
-      category: picked.category,
-      difficulty: picked.difficulty,
+      room: dealt.room,
+      question: {
+        id: picked.id,
+        prompt: picked.prompt,
+        choices: [first, second, third, fourth],
+        correctIndex: picked.correctIndex,
+        category: picked.category,
+        difficulty: picked.difficulty,
+      },
     }
   }
 

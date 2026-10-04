@@ -79,11 +79,17 @@ export interface PendingPlay {
   incorrect: number
 }
 
+export interface SeenQuestion {
+  id: string
+  difficulty: number
+}
+
 export interface Room {
   code: string
   hostToken: string
   players: Player[]
   asked: Question[]
+  seen: SeenQuestion[]
   history: AnswerRecord[]
   questionLimit: number
   questionIndex: number
@@ -120,6 +126,40 @@ export function scoreAnswer(correct: boolean, elapsedMs: number, durationMs: num
 export function difficultyForSlot(askedCount: number): number {
   if (askedCount < 0) return 1
   return Math.min(5, Math.floor(askedCount / 2) + 1)
+}
+
+export function dealExcludeIds(room: Room): string[] {
+  const ids = new Set<string>()
+  for (const item of room.seen) ids.add(item.id)
+  for (const question of room.asked) ids.add(question.id)
+  return [...ids]
+}
+
+export function releaseDifficulty(room: Room, difficulty: number): Room {
+  const kept = room.seen.filter((item) => item.difficulty !== difficulty)
+  const stillOut = room.asked
+    .filter((question) => question.difficulty === difficulty)
+    .filter((question) => kept.every((item) => item.id !== question.id))
+    .map((question) => ({ id: question.id, difficulty: question.difficulty }))
+  return { ...room, seen: [...kept, ...stillOut] }
+}
+
+export async function takeFromDeck(
+  room: Room,
+  target: number,
+  bounds: { minDifficulty: number; maxDifficulty: number } | null,
+  pick: (
+    excludeIds: string[],
+    difficulty: number,
+    bounds?: { minDifficulty: number; maxDifficulty: number },
+  ) => Promise<Question | null>,
+): Promise<{ room: Room; question: Question | null }> {
+  const exact = { minDifficulty: target, maxDifficulty: target }
+  const first = await pick(dealExcludeIds(room), target, exact)
+  if (first) return { room, question: first }
+  const deck = releaseDifficulty(room, target)
+  const second = await pick(dealExcludeIds(deck), target, bounds ?? undefined)
+  return { room: deck, question: second }
 }
 
 export function shuffle<T>(items: readonly T[], rng: () => number = Math.random): T[] {
@@ -165,6 +205,7 @@ export function createRoom(options: {
     hostToken: options.hostToken,
     players: [],
     asked: [],
+    seen: [],
     history: [],
     questionLimit,
     questionIndex: 0,
@@ -196,6 +237,7 @@ export function restoreRoom(raw: unknown): Room {
     hostToken: value.hostToken,
     players: value.players ?? [],
     asked: readAsked(value, phase, legacy),
+    seen: readSeen(value.seen),
     history: value.history ?? [],
     questionLimit: value.questionLimit ?? (legacy?.length || QUESTIONS_PER_ROUND),
     questionIndex: value.questionIndex ?? 0,
@@ -296,6 +338,31 @@ function readAsked(value: StoredRoom, phase: Room["phase"], legacy: Question[] |
   return legacy.slice(0, (value.questionIndex ?? 0) + 1)
 }
 
+function readSeen(value: unknown): SeenQuestion[] {
+  if (!Array.isArray(value)) return []
+  const seen: SeenQuestion[] = []
+  for (const item of value) {
+    const entry = readSeenQuestion(item)
+    if (!entry || seen.some((existing) => existing.id === entry.id)) continue
+    seen.push(entry)
+  }
+  return seen
+}
+
+function readSeenQuestion(item: unknown): SeenQuestion | null {
+  if (!item || typeof item !== "object") return null
+  const entry = item as Partial<SeenQuestion>
+  if (typeof entry.id !== "string" || entry.id.length === 0) return null
+  if (typeof entry.difficulty !== "number" || !Number.isInteger(entry.difficulty)) return null
+  if (entry.difficulty < 1 || entry.difficulty > 5) return null
+  return { id: entry.id, difficulty: entry.difficulty }
+}
+
+function rememberQuestion(seen: SeenQuestion[], question: Question): SeenQuestion[] {
+  if (seen.some((item) => item.id === question.id)) return seen
+  return [...seen, { id: question.id, difficulty: question.difficulty }]
+}
+
 export function joinPlayer(
   room: Room,
   input: { id: string; name: string; token: string },
@@ -356,6 +423,7 @@ export function startGame(room: Room, question: Question, now: number, roundId: 
   return {
     ...room,
     asked: [question],
+    seen: rememberQuestion(room.seen, question),
     history: [],
     questionIndex: 0,
     ...armReady(now),
@@ -567,6 +635,7 @@ export function nextQuestion(room: Room, question: Question | null, now: number)
   return {
     ...room,
     asked: [...room.asked, question],
+    seen: rememberQuestion(room.seen, question),
     questionIndex: room.asked.length,
     ...armReady(now),
     ...stoppedAdvance(),
