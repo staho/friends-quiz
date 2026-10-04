@@ -78,6 +78,22 @@ button { touch-action: manipulation; }
 
 .code.small { font-size: clamp(2.4rem, 12vw, 4rem); }
 
+.ready-count {
+  margin: 0;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  font-size: clamp(6rem, 22vw, 12rem);
+  line-height: 0.9;
+  text-align: center;
+}
+
+.phone-wait h1.ready-count {
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-weight: 800;
+  font-size: clamp(6rem, 28vw, 8rem);
+}
+
 .join-url {
   margin: 0;
   font-size: clamp(1.1rem, 2.5vw, 1.8rem);

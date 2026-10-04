@@ -8,10 +8,13 @@ import {
   NEXT_TIME_MIN_MS,
   QUESTION_DURATION_MS,
   QUESTIONS_PER_ROUND,
+  READY_DURATION_MS,
   type ChoiceIndex,
   type DifficultyBand,
   type HostView,
+  type Phase,
   type PlayerView,
+  type PublicReady,
   type PublicReveal,
   type RevealResult,
   type RoomSettings,
@@ -84,8 +87,9 @@ export interface Room {
   history: AnswerRecord[]
   questionLimit: number
   questionIndex: number
-  phase: "lobby" | "question" | "reveal" | "finished"
+  phase: Phase
   questionStartedAt: number | null
+  readyUntil: number | null
   questionDurationMs: number
   revealDurationMs: number
   autoAdvance: boolean
@@ -166,6 +170,7 @@ export function createRoom(options: {
     questionIndex: 0,
     phase: "lobby",
     questionStartedAt: null,
+    readyUntil: null,
     questionDurationMs: options.questionDurationMs ?? QUESTION_DURATION_MS,
     revealDurationMs: NEXT_TIME_DEFAULT_MS,
     autoAdvance: true,
@@ -196,6 +201,7 @@ export function restoreRoom(raw: unknown): Room {
     questionIndex: value.questionIndex ?? 0,
     phase,
     questionStartedAt: value.questionStartedAt ?? null,
+    readyUntil: readReadyUntil(phase, value.readyUntil),
     questionDurationMs: value.questionDurationMs ?? QUESTION_DURATION_MS,
     revealDurationMs: readRevealDuration(value.revealDurationMs),
     autoAdvance: value.autoAdvance !== false,
@@ -220,8 +226,14 @@ function readStoredRoom(raw: unknown): StoredRoom & { code: string; hostToken: s
 }
 
 function readPhase(phase: Room["phase"] | undefined): Room["phase"] {
-  if (phase === "question" || phase === "reveal" || phase === "finished") return phase
+  if (phase === "ready" || phase === "question" || phase === "reveal" || phase === "finished") return phase
   return "lobby"
+}
+
+function readReadyUntil(phase: Room["phase"], value: number | null | undefined): number | null {
+  if (phase !== "ready") return null
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  return 0
 }
 
 function readLegacyQuestions(value: StoredRoom): Question[] | null {
@@ -346,8 +358,7 @@ export function startGame(room: Room, question: Question, now: number, roundId: 
     asked: [question],
     history: [],
     questionIndex: 0,
-    phase: "question",
-    questionStartedAt: now,
+    ...armReady(now),
     answers: {},
     reveal: null,
     roundId,
@@ -446,6 +457,7 @@ export function advanceDue(room: Room, now: number): boolean {
 }
 
 export function alarmAt(room: Room): number | null {
+  if (room.phase === "ready" && room.readyUntil != null) return room.readyUntil
   if (room.phase === "question" && room.questionStartedAt != null) {
     return room.questionStartedAt + room.questionDurationMs
   }
@@ -461,6 +473,10 @@ export function difficultyBounds(band: DifficultyBand): { minDifficulty: number;
 }
 
 export function applyTick(room: Room, now: number): Room {
+  if (room.phase === "ready") {
+    if (room.readyUntil == null || now < room.readyUntil) return room
+    return openQuestion(room, now)
+  }
   if (room.phase !== "question" || room.questionStartedAt == null) return room
   const deadline = room.questionStartedAt + room.questionDurationMs
   const connected = room.players.filter((player) => player.connected)
@@ -514,6 +530,7 @@ export function reveal(room: Room, now: number): Room {
       ...room,
       phase: "reveal",
       questionStartedAt: null,
+      readyUntil: null,
       ...stoppedAdvance(),
       advanceAt: room.autoAdvance ? now + room.revealDurationMs : null,
       history: [...room.history, ...history],
@@ -540,6 +557,7 @@ export function nextQuestion(room: Room, question: Question | null, now: number)
       ...room,
       phase: "finished",
       questionStartedAt: null,
+      readyUntil: null,
       ...stoppedAdvance(),
       answers: {},
     }
@@ -548,8 +566,7 @@ export function nextQuestion(room: Room, question: Question | null, now: number)
     ...room,
     asked: [...room.asked, question],
     questionIndex: room.asked.length,
-    phase: "question",
-    questionStartedAt: now,
+    ...armReady(now),
     ...stoppedAdvance(),
     answers: {},
     reveal: null,
@@ -563,6 +580,7 @@ export function endGame(room: Room): Room {
     ...room,
     phase: "finished",
     questionStartedAt: null,
+    readyUntil: null,
     ...stoppedAdvance(),
     answers: {},
   }
@@ -577,6 +595,7 @@ export function resetRound(room: Room): Room {
     questionIndex: 0,
     phase: "lobby",
     questionStartedAt: null,
+    readyUntil: null,
     ...stoppedAdvance(),
     answers: {},
     reveal: null,
@@ -613,6 +632,7 @@ export function snapshotFor(room: Room, viewer: Viewer, now: number, lanAddresse
           difficulty: question.difficulty,
         }
       : null,
+    ready: readyView(room, now),
     reveal: room.phase === "reveal" || room.phase === "finished" ? room.reveal : null,
     you,
     lanAddresses,
@@ -627,6 +647,33 @@ export function normalizeName(input: string): string {
   if (!name) throw new GameError("Enter a name")
   if (name.length > MAX_NAME_LENGTH) throw new GameError("Use a shorter name")
   return name
+}
+
+function armReady(now: number): Pick<Room, "phase" | "questionStartedAt" | "readyUntil"> {
+  return {
+    phase: "ready",
+    questionStartedAt: null,
+    readyUntil: now + READY_DURATION_MS,
+  }
+}
+
+function openQuestion(room: Room, now: number): Room {
+  return {
+    ...room,
+    phase: "question",
+    questionStartedAt: now,
+    readyUntil: null,
+  }
+}
+
+function readyView(room: Room, now: number): PublicReady | null {
+  if (room.phase !== "ready" || room.readyUntil == null) return null
+  return {
+    index: room.questionIndex,
+    total: room.questionLimit,
+    remainingMs: Math.max(0, room.readyUntil - now),
+    durationMs: READY_DURATION_MS,
+  }
 }
 
 function playerView(room: Room, playerId: string): PlayerView {
