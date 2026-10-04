@@ -40,7 +40,12 @@ jobs:
           import { readFileSync, appendFileSync } from "node:fs"
           const raw = readFileSync("preview.json", "utf8")
           const parsed = JSON.parse(raw.slice(raw.indexOf("{")))
-          const urls = [...new Set([...(parsed.preview_urls ?? []), ...(parsed.deployment_urls ?? [])])]
+          const urls = [...new Set([
+            ...(parsed.preview_urls ?? []),
+            ...(parsed.deployment_urls ?? []),
+            ...(parsed.preview?.urls ?? []),
+            ...(parsed.deployment?.urls ?? []),
+          ].filter((url) => typeof url === "string"))]
           const summary = [
             "## Quiz preview",
             "",
@@ -52,6 +57,11 @@ jobs:
           appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary)
           if (urls.length === 0) {
             console.error("Wrangler did not return a preview URL")
+            console.error(JSON.stringify({
+              keys: Object.keys(parsed),
+              preview: parsed.preview ? Object.keys(parsed.preview) : null,
+              deployment: parsed.deployment ? Object.keys(parsed.deployment) : null,
+            }))
             process.exit(1)
           }
           console.log(urls.join("\n"))
