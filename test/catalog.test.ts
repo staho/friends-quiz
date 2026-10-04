@@ -212,6 +212,17 @@ describe("question catalog", () => {
     assert.equal(await pickRandomQuestion(db, blocked, 5, bounds), null)
   })
 
+  it("stays on an exhausted difficulty until that deck is drawn again", async () => {
+    const db = openMigrated()
+    const level = await listQuestions(db, { minDifficulty: 2, maxDifficulty: 2 })
+    const ids = level.map((item) => item.id)
+    const exact = { minDifficulty: 2, maxDifficulty: 2 }
+    assert.equal(await pickRandomQuestion(db, ids, 2, exact), null)
+    const fresh = await pickRandomQuestion(db, [], 2, exact)
+    assert.equal(fresh?.difficulty, 2)
+    assert.equal(ids.includes(fresh?.id ?? ""), true)
+  })
+
   it("prefers the requested difficulty and falls back to the nearest level", async () => {
     const db = openMigrated()
     const levelFive = await listQuestions(db, { minDifficulty: 5, maxDifficulty: 5 })

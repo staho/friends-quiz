@@ -14,6 +14,7 @@ import {
   joinPlayer,
   lockAnswer,
   withLiveConnections,
+  dealExcludeIds,
   nextQuestion,
   randomQuestionPolicy,
   resetRound,
@@ -22,6 +23,7 @@ import {
   snapshotFor,
   startGame,
   submitChoice,
+  takeFromDeck,
   updateSettings,
   type Question,
   type Room,
@@ -546,6 +548,95 @@ describe("get ready", () => {
     assert.equal(opened.phase, "question")
     assert.equal(opened.questionStartedAt, 4_000)
     assert.equal(opened.readyUntil, null)
+  })
+})
+
+describe("question deck", () => {
+  function atDifficulty(id: string, difficulty: number): Question {
+    return { ...question(id, 0), difficulty }
+  }
+
+  it("keeps asked questions out of the next round", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = playing(room, atDifficulty("a", 1), 0)
+    room = applyTick(room, duration)
+    room = openedNext(room, atDifficulty("c", 2), duration)
+    assert.deepEqual(room.seen, [
+      { id: "a", difficulty: 1 },
+      { id: "c", difficulty: 2 },
+    ])
+    room = resetRound(room)
+    assert.equal(room.asked.length, 0)
+    assert.deepEqual(dealExcludeIds(room), ["a", "c"])
+    assert.deepEqual(restoreRoom({ code: "QUIZ", hostToken: "host" }).seen, [])
+    assert.deepEqual(
+      restoreRoom({
+        code: "QUIZ",
+        hostToken: "host",
+        seen: [
+          { id: "paris", difficulty: 1 },
+          { id: "", difficulty: 1 },
+          { id: "nope", difficulty: 9 },
+          { id: "paris", difficulty: 2 },
+        ],
+      }).seen,
+      [{ id: "paris", difficulty: 1 }],
+    )
+  })
+
+  it("draws a used-up difficulty again and leaves the others out", async () => {
+    const pool = [atDifficulty("a", 1), atDifficulty("b", 1), atDifficulty("c", 2)]
+    const calls: Array<{ bounds?: { minDifficulty: number; maxDifficulty: number } }> = []
+    const pick = async (
+      excludeIds: string[],
+      difficulty: number,
+      bounds?: { minDifficulty: number; maxDifficulty: number },
+    ): Promise<Question | null> => {
+      calls.push({ bounds })
+      const min = bounds?.minDifficulty ?? 1
+      const max = bounds?.maxDifficulty ?? 5
+      const excluded = new Set(excludeIds)
+      const open = pool.filter(
+        (item) => item.difficulty >= min && item.difficulty <= max && !excluded.has(item.id),
+      )
+      return open.find((item) => item.difficulty === difficulty) ?? open[0] ?? null
+    }
+
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = playing(room, pool[0]!, 0)
+    room = { ...room, seen: [...room.seen, { id: "b", difficulty: 1 }, { id: "c", difficulty: 2 }] }
+    const dealt = await takeFromDeck(room, 1, null, pick)
+    assert.equal(dealt.question?.id, "b")
+    assert.deepEqual(dealt.room.seen, [
+      { id: "c", difficulty: 2 },
+      { id: "a", difficulty: 1 },
+    ])
+    assert.deepEqual(calls[0]?.bounds, { minDifficulty: 1, maxDifficulty: 1 })
+    assert.equal(calls[1]?.bounds, undefined)
+
+    room = resetRound(dealt.room)
+    room = {
+      ...room,
+      seen: [
+        { id: "a", difficulty: 1 },
+        { id: "b", difficulty: 1 },
+        { id: "c", difficulty: 2 },
+      ],
+    }
+    const fresh = await takeFromDeck(room, 1, null, pick)
+    assert.equal(fresh.question?.difficulty, 1)
+    assert.ok(fresh.question?.id === "a" || fresh.question?.id === "b")
+    assert.deepEqual(fresh.room.seen, [{ id: "c", difficulty: 2 }])
+    const started = startGame(fresh.room, fresh.question!, 0)
+    assert.equal(
+      started.seen.some((item) => item.id === fresh.question?.id && item.difficulty === 1),
+      true,
+    )
+    assert.equal(started.seen.some((item) => item.id === "c"), true)
+    const other = fresh.question?.id === "a" ? "b" : "a"
+    const follow = await takeFromDeck(started, 1, null, pick)
+    assert.equal(follow.question?.id, other)
+    assert.deepEqual(follow.room.seen, started.seen)
   })
 })
 
