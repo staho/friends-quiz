@@ -59,7 +59,7 @@ npm run dev
 
 `npm run dev` builds the client and starts Wrangler. Open the TV at [http://localhost:8787/host](http://localhost:8787/host). On your own Wi-Fi, use the network address Wrangler prints so phones can join.
 
-`npm run deploy` publishes the Worker. A push to `main` runs the tests and the typecheck, then deploys through GitHub Actions, with `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, to [friends-quiz.staho.dev](https://friends-quiz.staho.dev). A pull request deploys a separate Workers preview at `friends-quiz-pr-<number>.staho.dev` so the TV and a phone can open that branch. Preview addresses are public. Closing the pull request deletes that preview and its Durable Object storage. Production stays at [friends-quiz.staho.dev](https://friends-quiz.staho.dev).
+`npm run deploy` publishes the Worker. A push to `main` runs the tests and the typecheck, then deploys through GitHub Actions, with `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, to [friends-quiz.staho.dev](https://friends-quiz.staho.dev). A pull request deploys a separate Workers preview at `friends-quiz-pr-<number>.staho.dev` so the TV and a phone can open that branch. Preview addresses are public. Closing the pull request deletes that preview and its Durable Object storage. Previews left by pull requests that are already closed are deleted the same way. Production stays at [friends-quiz.staho.dev](https://friends-quiz.staho.dev).
 
 ## Tests
 
