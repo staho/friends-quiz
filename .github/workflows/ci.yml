@@ -2,11 +2,13 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, closed]
   push:
     branches: [main]
 
 jobs:
   test:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -20,7 +22,7 @@ jobs:
 
   preview:
     needs: test
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -105,4 +107,58 @@ jobs:
             process.exit(1)
           }
           console.log(`https://${host}/host`)
+          EOF
+
+  cleanup:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Delete the Workers preview
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          node --input-type=module <<'EOF'
+          import { spawnSync } from "node:child_process"
+          import { appendFileSync } from "node:fs"
+
+          const names = [
+            `friends-quiz-pr-${process.env.PR_NUMBER}`,
+            `pr-${process.env.PR_NUMBER}`,
+          ]
+          const removed = []
+          for (const name of names) {
+            const result = spawnSync(
+              "npx",
+              ["wrangler", "preview", "delete", "--name", name, "--skip-confirmation"],
+              { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+            )
+            const output = `${result.stdout ?? ""}${result.stderr ?? ""}`
+            process.stdout.write(output)
+            if (result.status === 0) {
+              removed.push(name)
+              continue
+            }
+            if (/not found|does not exist|\b404\b/i.test(output)) {
+              console.log(`Preview ${name} is already gone.`)
+              continue
+            }
+            process.exit(result.status ?? 1)
+          }
+          const summary = [
+            "## Preview cleanup",
+            "",
+            ...removed.map((name) => `- deleted \`${name}\``),
+            "",
+            "Production at friends-quiz.staho.dev is unchanged.",
+            "",
+          ].join("\n")
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary}\n`)
           EOF
