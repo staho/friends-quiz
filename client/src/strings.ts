@@ -165,6 +165,8 @@ export const t = {
   tiedFirst: "1. miejsce ex aequo",
   placeGap: "{rank}. miejsce · {gap} do lidera",
   joinedLateWait: "Runda już trwa. Wskakujesz od następnego pytania.",
+  secsLeftShort: (n: number) => `${n}${NBSP}s`,
+  changeHint: "Możesz jeszcze zmienić.",
   // --- end WP6 phone ---
 
   // --- WP7 meta ---

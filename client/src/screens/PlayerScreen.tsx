@@ -10,7 +10,7 @@ import { retryDelayMs } from "../hostSession"
 import { local } from "../storage"
 import { useRoom } from "../useRoom"
 import { usePlayerSounds } from "../useSounds"
-import { formatNumber, t } from "../strings"
+import { formatNumber, formatPoints, t } from "../strings"
 
 export function PlayerScreen() {
   const { snapshot, connected } = useRoom()
@@ -324,7 +324,10 @@ function QuestionView({
       <header className="phone-head">
         <span>{t.progress(question.index + 1, question.total)}</span>
         <TimerBar remainingMs={question.remainingMs} durationMs={question.durationMs} leftMs={left} />
-        <strong>{formatNumber(you.score)}</strong>
+        <span className={left <= 5000 ? "phone-secs urgent" : "phone-secs"}>
+          {t.secsLeftShort(Math.ceil(left / 1000))}
+        </span>
+        <strong>{formatPoints(you.score)}</strong>
       </header>
       <AnswerGrid
         choices={question.choices}
@@ -333,7 +336,7 @@ function QuestionView({
         onPick={onPick}
       />
       <div className="lockbar">
-        <p className="hint">{you.locked ? t.lockedIn : t.canChange}</p>
+        <p className="hint">{you.locked ? t.lockedIn : t.changeHint}</p>
         <button
           type="button"
           className="btn primary"
