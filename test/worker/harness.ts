@@ -49,8 +49,16 @@ export interface Client {
   close(): void
 }
 
-export async function createRoom(url: string): Promise<{ code: string; hostToken: string }> {
-  const res = await fetch(`${url}/api/rooms`, { method: "POST" })
+// The room-creation limit is keyed on CF-Connecting-IP (server/http.ts clientKey), so every call
+// gets its own fake client IP unless one is given; tests then cannot starve each other's quota.
+let nextClient = 0
+export function uniqueClientIp(): string {
+  const n = ++nextClient
+  return `10.${(n >> 16) & 255}.${(n >> 8) & 255}.${n & 255}`
+}
+
+export async function createRoom(url: string, clientIp = uniqueClientIp()): Promise<{ code: string; hostToken: string }> {
+  const res = await fetch(`${url}/api/rooms`, { method: "POST", headers: { "CF-Connecting-IP": clientIp } })
   if (res.status !== 201) throw new Error(`create room: ${res.status}`)
   return (await res.json()) as { code: string; hostToken: string }
 }

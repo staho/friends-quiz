@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { after, before, describe, it } from "node:test"
 import { MAX_JOINS_PER_SOCKET, MAX_PLAYERS, type PlayerSession } from "../../shared/types.ts"
-import { connect, createRoom, startTestWorker, type Client, type TestWorker } from "./harness.ts"
+import { connect, createRoom, startTestWorker, uniqueClientIp, type Client, type TestWorker } from "./harness.ts"
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const settings = { questionDurationMs: 5_000, revealDurationMs: 2_000, autoAdvance: true, difficulty: "mixed" }
@@ -199,8 +199,9 @@ describe("room Durable Object over WebSockets", { timeout: 120_000 }, () => {
 
   it("rate limits room creation", async (t) => {
     const statuses: number[] = []
+    const headers = { "CF-Connecting-IP": uniqueClientIp() }
     for (let i = 0; i < 12; i++) {
-      statuses.push((await fetch(`${worker.url}/api/rooms`, { method: "POST" })).status)
+      statuses.push((await fetch(`${worker.url}/api/rooms`, { method: "POST", headers })).status)
     }
     if (!statuses.includes(429)) {
       t.skip("local miniflare does not enforce ratelimits; test/http.test.ts covers the key")
