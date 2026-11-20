@@ -6,6 +6,17 @@ export function useRoom() {
   const [snapshot, setSnapshot] = useState<RoomSnapshot | null>(null)
   const [connected, setConnected] = useState(socket.connected)
 
+  const [reconnecting, setReconnecting] = useState(false)
+
+  useEffect(() => {
+    if (connected) {
+      setReconnecting(false)
+      return
+    }
+    const timer = window.setTimeout(() => setReconnecting(true), 1500)
+    return () => window.clearTimeout(timer)
+  }, [connected])
+
   useEffect(() => {
     const onState = (next: RoomSnapshot) => setSnapshot(next)
     const onConnect = () => setConnected(true)
@@ -20,5 +31,5 @@ export function useRoom() {
     }
   }, [])
 
-  return { snapshot, connected }
+  return { snapshot, connected, reconnecting }
 }
