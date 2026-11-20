@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react"
+import { useLayoutEffect, useRef, type CSSProperties, type RefObject } from "react"
 import { CHOICES } from "@shared/types"
 import { fmt, t } from "./strings"
 
@@ -20,8 +20,10 @@ export function AnswerGrid({
 }) {
   const revealed = correctIndex != null
   const total = counts ? counts.reduce((sum, n) => sum + n, 0) : 0
+  const grid = useRef<HTMLDivElement>(null)
+  useFitAnswers(grid, onPick == null, choices.join("\n"))
   return (
-    <div className={onPick ? "answer-grid phone" : "answer-grid tv"} role="list">
+    <div ref={grid} className={onPick ? "answer-grid phone" : "answer-grid tv"} role="list">
       {choices.map((choice, index) => {
         const meta = CHOICES[index]
         if (!meta) return null
@@ -65,6 +67,45 @@ export function AnswerGrid({
       })}
     </div>
   )
+}
+
+/** The sizes tried, in order, when a word is wider than its tile: smaller text first, then a stacked tile. */
+const FIT_STEPS: ReadonlyArray<{ stacked: boolean; scale: number }> = [
+  ...[1, 0.92, 0.84, 0.76].map((scale) => ({ stacked: false, scale })),
+  ...[1, 0.9, 0.8, 0.7, 0.6, 0.5].map((scale) => ({ stacked: true, scale })),
+]
+
+function wordsFit(grid: HTMLElement): boolean {
+  return [...grid.querySelectorAll<HTMLElement>(".label")].every((label) => label.scrollWidth <= label.clientWidth + 1)
+}
+
+/**
+ * TV answers never break a word. Every tile of a grid takes the same text size: the biggest at which
+ * the longest word still fits its tile, and when no plain size does, the stacked tile (letter and
+ * count above the text, so the text has the whole width). Redone when the grid's width changes.
+ */
+function useFitAnswers(grid: RefObject<HTMLDivElement | null>, tv: boolean, content: string): void {
+  useLayoutEffect(() => {
+    const el = grid.current
+    if (!el || !tv) return
+    const fit = () => {
+      for (const step of FIT_STEPS) {
+        el.dataset.stacked = step.stacked ? "true" : "false"
+        el.style.setProperty("--fit", String(step.scale))
+        if (wordsFit(el)) return
+      }
+    }
+    fit()
+    if (typeof ResizeObserver === "undefined") return
+    let width = el.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === width) return
+      width = el.clientWidth
+      fit()
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [grid, tv, content])
 }
 
 function PickCount({ n, total }: { n: number; total: number }) {

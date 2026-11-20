@@ -709,7 +709,29 @@ html:-webkit-full-screen body {
 
 .stage.tv .prompt { font-size: clamp(2.4rem, 4.2vw, 5rem); }
 
-.stage.tv .answer .label { font-size: clamp(1.6rem, 2.6vw, 3rem); }
+.stage.tv .answer .label {
+  font-size: calc(clamp(1.6rem, 2.6vw, 3rem) * var(--fit, 1));
+  /* A word is never broken: useFitAnswers shrinks the text or stacks the tile instead. */
+  min-width: 0;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: manual;
+}
+
+/* Stacked tile: the letter and the pick count share a top row and the text gets the full width. */
+.answer-grid.tv[data-stacked="true"] .answer {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    "letter . count"
+    "label label label";
+  align-content: center;
+  row-gap: 6px;
+}
+
+.answer-grid.tv[data-stacked="true"] .answer .letter { grid-area: letter; }
+.answer-grid.tv[data-stacked="true"] .answer .label { grid-area: label; }
+.answer-grid.tv[data-stacked="true"] .answer .count { grid-area: count; margin-left: 0; }
 
 .stage.tv .answer { min-height: 140px; }
 
@@ -736,7 +758,7 @@ html:-webkit-full-screen body {
     padding: 10px 14px;
   }
 
-  .stage.tv .answer .label { font-size: clamp(1.2rem, 1.95vw, 2.25rem); }
+  .stage.tv .answer .label { font-size: calc(clamp(1.2rem, 1.95vw, 2.25rem) * var(--fit, 1)); }
 
   .stage.tv .answer .letter {
     width: 42px;
@@ -952,4 +974,9 @@ html:-webkit-full-screen body {
 .final-body .standings {
   grid-template-rows: repeat(var(--rows, 1), minmax(0, 4.5rem));
   align-content: start;
+}
+
+.hint.paused {
+  color: #b45f00;
+  font-weight: 750;
 }
