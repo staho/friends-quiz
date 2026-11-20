@@ -3,6 +3,7 @@ import type { HostSession, RoomSettings, RoomSnapshot } from "@shared/types"
 import { MuteButton } from "../MuteButton"
 import { request, socket } from "../socket"
 import { useRoom } from "../useRoom"
+import { t } from "../strings"
 import { useHostSounds } from "../useSounds"
 import { FinalBoard } from "./host/FinalBoard"
 import { LobbyBoard } from "./host/LobbyBoard"
@@ -24,7 +25,7 @@ export function HostScreen() {
       void openOrAttach()
         .then(() => setError(null))
         .catch((err: unknown) => {
-          setError(err instanceof Error ? err.message : "Could not open a room")
+          setError(err instanceof Error ? err.message : t.couldNotOpen)
         })
     }
     socket.on("connect", boot)
@@ -40,7 +41,7 @@ export function HostScreen() {
     try {
       await action()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Try that again")
+      setError(err instanceof Error ? err.message : t.tryAgain)
     } finally {
       setBusy(false)
     }
@@ -50,16 +51,16 @@ export function HostScreen() {
     <main className="stage tv">
       <HostSoundTrack snapshot={snapshot} />
       <div className="stage-bar">
-        <p className="eyebrow">Friends quiz</p>
+        <p className="eyebrow">{t.appName}</p>
         <div className="stage-tools">
           <MuteButton />
           <FullScreenToggle />
         </div>
       </div>
-      {!connected && <p className="banner">Reconnecting to the table…</p>}
+      {!connected && <p className="banner">{t.reconnecting}</p>}
       {error && <p className="banner">{error}</p>}
       {!snapshot ? (
-        <p className="waiting">Setting the table…</p>
+        <p className="waiting">{t.settingUp}</p>
       ) : (
         <HostBody
           snapshot={snapshot}
@@ -199,9 +200,9 @@ function FullScreenToggle() {
         aria-pressed={active}
         onClick={() => void toggle()}
       >
-        {active ? "Exit full screen" : "Full screen"}
+        {active ? t.exitFullScreen : t.fullScreen}
       </button>
-      {unavailable && <p className="fullscreen-hint">Full screen isn't available in this browser</p>}
+      {unavailable && <p className="fullscreen-hint">{t.fullScreenUnavailable}</p>}
     </div>
   )
 }

@@ -1,7 +1,8 @@
 import { useEffect } from "react"
 import type { RevealResult, RoomSettings, RoomSnapshot } from "@shared/types"
-import { AnswerGrid, formatLockSeconds } from "../../components"
+import { AnswerGrid } from "../../components"
 import { useCountdown } from "../../useCountdown"
+import { formatNumber, formatSeconds, t } from "../../strings"
 import { RoundSettings } from "./HostSettings"
 
 export function RevealBoard({
@@ -44,34 +45,34 @@ export function RevealBoard({
   const waiting = snapshot.settings.autoAdvance && snapshot.revealRemainingMs != null
   return (
     <section className="board reveal">
-      <p className="kicker">The answer</p>
+      <p className="kicker">{t.theAnswer}</p>
       <h1 className="prompt">{reveal.prompt}</h1>
       <AnswerGrid choices={reveal.choices} selected={null} correctIndex={reveal.correctIndex} />
       <ScoreList snapshot={snapshot} />
       {waiting && (
         <p className="hint">
           {snapshot.advancePaused
-            ? `Holding the answer · ${Math.ceil(left / 1000)}s left`
+            ? t.holdingLeft(Math.ceil(left / 1000))
             : left <= 0
-              ? "Next question now"
-              : `Next question in ${Math.ceil(left / 1000)}s`}
+              ? t.nextNow
+              : t.nextIn(Math.ceil(left / 1000))}
         </p>
       )}
       <div className="controls">
         <button type="button" className="btn primary" disabled={busy} onClick={onNext}>
-          Next
+          {t.next}
         </button>
         {snapshot.settings.autoAdvance && (
           <button type="button" className="btn ghost" disabled={busy} onClick={onPause}>
-            {snapshot.advancePaused ? "Resume" : "Pause"}
+            {snapshot.advancePaused ? t.resume : t.pause}
           </button>
         )}
         <button type="button" className="btn ghost" disabled={busy} onClick={onEnd}>
-          End
+          {t.end}
         </button>
       </div>
       {snapshot.settings.autoAdvance && (
-        <p className="hint">{snapshot.advancePaused ? "Holding the answer" : "Space pauses"}</p>
+        <p className="hint">{snapshot.advancePaused ? t.holding : t.spacePauses}</p>
       )}
       <RoundSettings snapshot={snapshot} busy={busy} onSettings={onSettings} />
     </section>
@@ -79,16 +80,16 @@ export function RevealBoard({
 }
 
 function resultPace(result: RevealResult): string {
-  if (result.choiceIndex == null) return "no answer"
-  const outcome = result.correct ? `+${result.points}` : "miss"
+  if (result.choiceIndex == null) return t.noAnswer
+  const outcome = result.correct ? `+${formatNumber(result.points)}` : t.miss
   if (typeof result.locked !== "boolean" || typeof result.elapsedMs !== "number") return outcome
-  if (!result.locked) return `${outcome} · didn't lock`
-  return `${outcome} · ${formatLockSeconds(result.elapsedMs)}`
+  if (!result.locked) return `${outcome} · ${t.notLocked}`
+  return `${outcome} · ${formatSeconds(result.elapsedMs)}`
 }
 
 function ScoreList({ snapshot }: { snapshot: RoomSnapshot }) {
   const results = [...(snapshot.reveal?.results ?? [])].sort(
-    (a, b) => b.score - a.score || a.name.localeCompare(b.name),
+    (a, b) => b.score - a.score || a.name.localeCompare(b.name, "pl"),
   )
   return (
     <ol className="scores">
@@ -96,7 +97,7 @@ function ScoreList({ snapshot }: { snapshot: RoomSnapshot }) {
         <li key={result.playerId}>
           <span className="score-name">{result.name}</span>
           <span className={result.correct ? "gain" : "miss"}>{resultPace(result)}</span>
-          <strong>{result.score}</strong>
+          <strong>{formatNumber(result.score)}</strong>
         </li>
       ))}
     </ol>

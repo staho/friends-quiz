@@ -29,6 +29,12 @@ export function fmt(template: string, vars: Record<string, string | number>): st
   return template.replace(/\{(\w+)\}/g, (match, key: string) => (key in vars ? String(vars[key]) : match))
 }
 
+export const formatPoints = (n: number) => `${formatNumber(n)}${NBSP}pkt`
+const secondsWord = (n: number) => plural(n, "sekunda", "sekundy", "sekund")
+const playersWord = (n: number) => plural(n, "gracz", "gracze", "graczy")
+const pointsWord = (n: number) => plural(n, "punkt", "punkty", "punktów")
+const wholeSeconds = (n: number) => `${n}${NBSP}s`
+
 export const t = {
   // --- server errors ---
   errRoomNotFound: "Nie ma takiego pokoju. Sprawdź kod.",
@@ -60,6 +66,81 @@ export const t = {
   errReconnecting: "Łączę ponownie…",
   errNoReply: "Stolik nie odpowiada. Spróbuj jeszcze raz.",
   errUnreachable: "Nie można połączyć się ze stolikiem.",
+
+  // --- interface ---
+  appName: "Quiz ze znajomymi",
+  mute: "Wycisz",
+  unmute: "Włącz dźwięk",
+  fullScreen: "Pełny ekran",
+  exitFullScreen: "Zamknij pełny ekran",
+  fullScreenUnavailable: "Ta przeglądarka nie obsługuje pełnego ekranu",
+  reconnecting: "Łączę ponownie…",
+  findingSeat: "Szukam twojego miejsca…",
+  settingUp: "Szykuję grę…",
+  couldNotJoin: "Nie udało się dołączyć",
+  couldNotOpen: "Nie udało się otworzyć pokoju",
+  tryAgain: "Spróbuj jeszcze raz",
+  joinTitle: "Dosiądź się",
+  roomCode: "Kod pokoju",
+  yourName: "Twoje imię",
+  join: "Dołącz",
+  hostGame: "Otwórz grę na TV",
+  youreIn: "Jesteś w grze",
+  tvStarts: "Rundę startuje telewizor.",
+  leave: "Wyjdź",
+  lockedIn: "Zatwierdzone",
+  canChange: "Możesz zmienić, dopóki nie zatwierdzisz.",
+  lockIn: "Zatwierdź",
+  timesUp: "Koniec czasu",
+  wrong: "Tym razem nie",
+  yourScore: "Twój wynik",
+  roundOver: "Koniec rundy",
+  scoresOnTv: "Pełne wyniki są na telewizorze.",
+  getReady: "Przygotuj się",
+  noLockPace: "Bez zatwierdzenia liczy się cały czas.",
+  joinOnPhone: "Dołącz telefonem",
+  start: "Zaczynamy",
+  waitingFirst: "Czekam na pierwszy telefon.",
+  end: "Zakończ",
+  next: "Dalej",
+  pause: "Pauza",
+  resume: "Wznów",
+  nextNow: "Już następne pytanie",
+  theAnswer: "Poprawna odpowiedź",
+  holding: "Pauza",
+  spacePauses: "Spacja – pauza",
+  noAnswer: "brak odpowiedzi",
+  miss: "pudło",
+  notLocked: "bez zatwierdzenia",
+  finalTable: "Wyniki końcowe",
+  newRound: "Nowa runda",
+  nobodyPlayed: "Nikt nie zagrał.",
+  roundSettings: "Ustawienia rundy",
+  answerTime: "Czas na odpowiedź",
+  autoNext: "Następne pytanie automatycznie",
+  nextTime: "Czas do następnego pytania",
+  difficulty: "Poziom trudności",
+  bandMixed: "1–5",
+
+  progress: (n: number, total: number) => `${n} / ${total}`,
+  correctGain: (points: number) => `Dobrze! +${formatNumber(points)}`,
+  place: (n: number) => `${n}. miejsce`,
+  finalLine: (n: number, score: number) => `${n}. miejsce · ${formatPoints(score)}`,
+  questionOf: (n: number, total: number) => `Pytanie ${n} z ${total}`,
+  questionKicker: (n: number, total: number, level: number) => `Pytanie ${n} z ${total} · Poziom ${level}`,
+  lockedAt: (ms: number) => `Zatwierdzone po ${formatSeconds(ms)}.`,
+  lockedCount: (locked: number, active: number) => `Zatwierdzone: ${locked} z ${active}`,
+  waitingOn: (names: string[]) => ` · czekamy na: ${names.join(", ")}`,
+  roomCodeAria: (code: string) => `Kod pokoju ${code}`,
+  scanToJoin: (url: string) => `Zeskanuj, żeby dołączyć: ${url}`,
+  secondsLeft: (n: number) => `${plural(n, "Została", "Zostały", "Zostało")} ${n} ${secondsWord(n)}`,
+  secondsUnit: (n: number | null) => (n === null ? "s" : secondsWord(n)),
+  nextTimeHint: (n: number | null) =>
+    `${n === null ? "s" : secondsWord(n)} z odpowiedzią na ekranie, potem 3${NBSP}s odliczania`,
+  holdingLeft: (n: number) => `Pauza · zostało ${wholeSeconds(n)}`,
+  nextIn: (n: number) => `Następne pytanie za ${wholeSeconds(n)}`,
+  players: (n: number) => `${n} ${playersWord(n)}`,
+  points: (n: number) => `${formatNumber(n)} ${pointsWord(n)}`,
 
   // --- WP2 TV ---
   // --- end WP2 TV ---

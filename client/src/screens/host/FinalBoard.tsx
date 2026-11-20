@@ -1,4 +1,5 @@
 import type { PublicPlayer, RoomSettings, RoomSnapshot } from "@shared/types"
+import { formatNumber, t } from "../../strings"
 import { RoundSettings } from "./HostSettings"
 
 export function FinalBoard({
@@ -14,11 +15,11 @@ export function FinalBoard({
 }) {
   return (
     <section className="board final">
-      <p className="kicker">Final table</p>
+      <p className="kicker">{t.finalTable}</p>
       <Podium players={snapshot.players} />
       <div className="controls">
         <button type="button" className="btn primary" disabled={busy} onClick={onReset}>
-          New round
+          {t.newRound}
         </button>
       </div>
       <RoundSettings snapshot={snapshot} busy={busy} onSettings={onSettings} />
@@ -27,15 +28,15 @@ export function FinalBoard({
 }
 
 function Podium({ players }: { players: PublicPlayer[] }) {
-  const ranked = [...players].sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
-  if (ranked.length === 0) return <p className="hint">Nobody played.</p>
+  const ranked = [...players].sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, "pl"))
+  if (ranked.length === 0) return <p className="hint">{t.nobodyPlayed}</p>
   return (
     <ol className="podium">
       {ranked.map((player, index) => (
         <li key={player.id} className={index < 3 ? `place place-${index + 1}` : "place"}>
           <span className="place-rank">{index + 1}</span>
           <span className="place-name">{player.name}</span>
-          <strong>{player.score}</strong>
+          <strong>{formatNumber(player.score)}</strong>
         </li>
       ))}
     </ol>

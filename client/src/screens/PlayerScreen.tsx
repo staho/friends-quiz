@@ -1,12 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react"
 import { useCountdown } from "../useCountdown"
 import type { PlayerSession, RevealResult, RoomSnapshot } from "@shared/types"
-import { AnswerGrid, formatCode, formatLockSeconds } from "../components"
+import { AnswerGrid, formatCode } from "../components"
 import { MuteButton } from "../MuteButton"
 import { request, socket } from "../socket"
 import { errorCode } from "../errors"
 import { useRoom } from "../useRoom"
 import { usePlayerSounds } from "../useSounds"
+import { formatNumber, t } from "../strings"
 
 const PLAYER_KEY = "friends-quiz-player"
 
@@ -63,7 +64,7 @@ export function PlayerScreen() {
       )
       sessionStorage.setItem(PLAYER_KEY, JSON.stringify(session))
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not join")
+      setError(err instanceof Error ? err.message : t.couldNotJoin)
     } finally {
       setBusy(false)
     }
@@ -74,10 +75,10 @@ export function PlayerScreen() {
 
   return (
     <main className="stage phone">
-      {!connected && <p className="banner">Reconnecting…</p>}
+      {!connected && <p className="banner">{t.reconnecting}</p>}
       {error && <p className="banner">{error}</p>}
       {restoring ? (
-        <p className="waiting">Finding your seat…</p>
+        <p className="waiting">{t.findingSeat}</p>
       ) : playing ? (
         <>
           <div className="phone-tools">
@@ -96,10 +97,10 @@ export function PlayerScreen() {
             void join(event)
           }}
         >
-          <p className="eyebrow">Friends quiz</p>
-          <h1>Grab a seat</h1>
+          <p className="eyebrow">{t.appName}</p>
+          <h1>{t.joinTitle}</h1>
           <label>
-            Room code
+            {t.roomCode}
             <input
               name="quiz-room-code"
               value={code}
@@ -114,7 +115,7 @@ export function PlayerScreen() {
             />
           </label>
           <label>
-            Your name
+            {t.yourName}
             <input
               name="quiz-player-name"
               value={name}
@@ -126,10 +127,10 @@ export function PlayerScreen() {
             />
           </label>
           <button type="submit" className="btn primary" disabled={busy}>
-            Join
+            {t.join}
           </button>
           <button type="button" className="btn ghost" onClick={() => window.location.assign("/host")}>
-            Host a game
+            {t.hostGame}
           </button>
         </form>
       )}
@@ -154,7 +155,7 @@ function Play({
     try {
       await run()
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Try that again")
+      onError(err instanceof Error ? err.message : t.tryAgain)
     } finally {
       setBusy(false)
     }
@@ -163,13 +164,13 @@ function Play({
   if (snapshot.phase === "lobby") {
     return (
       <section className="phone-wait">
-        <p className="eyebrow">You're in</p>
+        <p className="eyebrow">{t.youreIn}</p>
         <h1>{you.name}</h1>
         <p className="code small">{formatCode(snapshot.code)}</p>
-        <p className="hint">The TV starts the round.</p>
+        <p className="hint">{t.tvStarts}</p>
         <PlayerNames snapshot={snapshot} />
         <button type="button" className="btn ghost" onClick={leave}>
-          Leave
+          {t.leave}
         </button>
       </section>
     )
@@ -185,9 +186,9 @@ function Play({
       <section className="phone-play">
         <header className="phone-head">
           <span>
-            {question.index + 1} / {question.total}
+            {t.progress(question.index + 1, question.total)}
           </span>
-          <strong>{you.score}</strong>
+          <strong>{formatNumber(you.score)}</strong>
         </header>
         <AnswerGrid
           choices={question.choices}
@@ -198,14 +199,14 @@ function Play({
           }
         />
         <div className="lockbar">
-          <p className="hint">{you.locked ? "Locked in" : "You can change it until you lock in."}</p>
+          <p className="hint">{you.locked ? t.lockedIn : t.canChange}</p>
           <button
             type="button"
             className="btn primary"
             disabled={busy || you.locked || you.choiceIndex == null}
             onClick={() => void act(() => request((ack) => socket.emit("player:lock", ack)))}
           >
-            {you.locked ? "Locked in" : "Lock in"}
+            {you.locked ? t.lockedIn : t.lockIn}
           </button>
         </div>
       </section>
@@ -215,7 +216,7 @@ function Play({
   if (snapshot.phase === "reveal") {
     const mine = snapshot.reveal?.results.find((result) => result.playerId === you.playerId)
     const title =
-      mine == null || mine.choiceIndex == null ? "Time's up" : mine.correct ? `Yes — +${mine.points}` : "Not this time"
+      mine == null || mine.choiceIndex == null ? t.timesUp : mine.correct ? t.correctGain(mine.points) : t.wrong
     return (
       <section className="phone-wait">
         <p className="eyebrow">{you.name}</p>
@@ -228,7 +229,7 @@ function Play({
           />
         )}
         <p className="score-line">
-          Your score <strong>{you.score}</strong>
+          {t.yourScore} <strong>{formatNumber(you.score)}</strong>
         </p>
         {mine && <p className="hint">{paceHint(mine)}</p>}
       </section>
@@ -238,13 +239,13 @@ function Play({
   const ahead = snapshot.players.filter((player) => player.score > you.score).length
   return (
     <section className="phone-wait">
-      <p className="eyebrow">That's the round</p>
+      <p className="eyebrow">{t.roundOver}</p>
       <h1>
-        {placeLabel(ahead + 1)} · {you.score}
+        {t.finalLine(ahead + 1, you.score)}
       </h1>
-      <p className="hint">Scores stay on the TV.</p>
+      <p className="hint">{t.scoresOnTv}</p>
       <button type="button" className="btn ghost" onClick={leave}>
-        Leave
+        {t.leave}
       </button>
     </section>
   )
@@ -255,22 +256,20 @@ function GetReady({ ready }: { ready: NonNullable<RoomSnapshot["ready"]> }) {
   const count = Math.max(1, Math.ceil(left / 1000))
   return (
     <section className="phone-wait">
-      <p className="eyebrow">Get ready</p>
+      <p className="eyebrow">{t.getReady}</p>
       <h1 className="ready-count" aria-live="polite">
         {count}
       </h1>
-      <p className="hint">
-        Question {ready.index + 1} of {ready.total}
-      </p>
+      <p className="hint">{t.questionOf(ready.index + 1, ready.total)}</p>
     </section>
   )
 }
 
 function paceHint(result: RevealResult): string {
   if (result.choiceIndex == null || result.locked !== true || typeof result.elapsedMs !== "number") {
-    return "You didn't lock in, so the question used the full timer."
+    return t.noLockPace
   }
-  return `You locked in at ${formatLockSeconds(result.elapsedMs)}.`
+  return t.lockedAt(result.elapsedMs)
 }
 
 function leave(): void {
@@ -288,13 +287,6 @@ function PlayerNames({ snapshot }: { snapshot: RoomSnapshot }) {
       ))}
     </ul>
   )
-}
-
-function placeLabel(place: number): string {
-  if (place === 1) return "1st"
-  if (place === 2) return "2nd"
-  if (place === 3) return "3rd"
-  return `${place}th`
 }
 
 function initialCode(): string {

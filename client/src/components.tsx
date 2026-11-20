@@ -1,4 +1,5 @@
 import { CHOICES } from "@shared/types"
+import { t } from "./strings"
 
 export function AnswerGrid({
   choices,
@@ -64,7 +65,7 @@ export function TimerBar({ leftMs, durationMs }: { leftMs: number; durationMs: n
   const seconds = Math.ceil(leftMs / 1000)
   const urgent = seconds <= 5
   return (
-    <div className="timer" aria-label={`${seconds} seconds left`}>
+    <div className="timer" aria-label={t.secondsLeft(seconds)}>
       <div className="timer-track">
         <div
           className={urgent ? "timer-fill urgent" : "timer-fill"}
@@ -90,10 +91,4 @@ export function joinUrl(origin: string, code: string): string {
 
 export function formatCode(code: string): string {
   return code.split("").join(" ")
-}
-
-export function formatLockSeconds(elapsedMs: number): string {
-  const seconds = Math.max(0, elapsedMs) / 1000
-  const rounded = seconds >= 10 ? Math.round(seconds) : Math.round(seconds * 10) / 10
-  return `${rounded}s`
 }

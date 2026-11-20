@@ -1,6 +1,7 @@
 import { QRCodeSVG } from "qrcode.react"
 import type { PublicPlayer, RoomSettings, RoomSnapshot } from "@shared/types"
 import { formatCode, joinOrigin, joinUrl } from "../../components"
+import { t } from "../../strings"
 import { RoundSettings } from "./HostSettings"
 
 export function LobbyBoard({
@@ -20,9 +21,9 @@ export function LobbyBoard({
     <section className="lobby">
       <div className="join-row">
         <div className="join-copy">
-          <p className="hint">Join on your phone</p>
+          <p className="hint">{t.joinOnPhone}</p>
           <p className="join-url">{origin}</p>
-          <p className="code" aria-label={`Room code ${snapshot.code}`}>
+          <p className="code" aria-label={t.roomCodeAria(snapshot.code)}>
             {formatCode(snapshot.code)}
           </p>
         </div>
@@ -32,7 +33,7 @@ export function LobbyBoard({
       <RoundSettings snapshot={snapshot} busy={busy} onSettings={onSettings} />
       <div className="controls">
         <button type="button" className="btn primary" disabled={busy || snapshot.players.length === 0} onClick={onStart}>
-          Start
+          {t.start}
         </button>
       </div>
     </section>
@@ -50,14 +51,14 @@ function JoinQr({ url }: { url: string }) {
         bgColor="#ffffff"
         fgColor="#1a120c"
         role="img"
-        aria-label={`Scan to join ${url}`}
+        aria-label={t.scanToJoin(url)}
       />
     </div>
   )
 }
 
 function PlayerStrip({ players }: { players: PublicPlayer[] }) {
-  if (players.length === 0) return <p className="hint">Waiting for the first phone.</p>
+  if (players.length === 0) return <p className="hint">{t.waitingFirst}</p>
   return (
     <ul className="chips">
       {players.map((player) => (

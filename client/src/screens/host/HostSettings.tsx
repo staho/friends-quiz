@@ -9,9 +9,10 @@ import {
   type RoomSettings,
   type RoomSnapshot,
 } from "@shared/types"
+import { t } from "../../strings"
 
 const BAND_LABEL: Record<DifficultyBand, string> = {
-  mixed: "Mixed",
+  mixed: t.bandMixed,
   "1-2": "1–2",
   "2-4": "2–4",
   "4-5": "4–5",
@@ -28,7 +29,7 @@ export function RoundSettings({
 }) {
   return (
     <details className="settings-fold">
-      <summary>Round settings</summary>
+      <summary>{t.roundSettings}</summary>
       <SettingsFields settings={snapshot.settings} busy={busy} onSettings={onSettings} />
     </details>
   )
@@ -46,8 +47,8 @@ function SettingsFields({
   return (
     <div className="settings-fields">
       <SecondsField
-        label="Answer time"
-        hint="seconds"
+        label={t.answerTime}
+        hint={t.secondsUnit}
         ms={settings.questionDurationMs}
         minMs={ANSWER_TIME_MIN_MS}
         maxMs={ANSWER_TIME_MAX_MS}
@@ -61,11 +62,11 @@ function SettingsFields({
           disabled={busy}
           onChange={(event) => onSettings({ ...settings, autoAdvance: event.target.checked })}
         />
-        Automatic next question
+        {t.autoNext}
       </label>
       <SecondsField
-        label="Time to the next question"
-        hint="seconds on the answer, then 3 to get ready"
+        label={t.nextTime}
+        hint={t.nextTimeHint}
         ms={settings.revealDurationMs}
         minMs={NEXT_TIME_MIN_MS}
         maxMs={NEXT_TIME_MAX_MS}
@@ -73,7 +74,7 @@ function SettingsFields({
         onMs={(revealDurationMs) => onSettings({ ...settings, revealDurationMs })}
       />
       <div className="setting">
-        <span className="setting-label">Difficulty</span>
+        <span className="setting-label">{t.difficulty}</span>
         <div className="bands">
           {DIFFICULTY_BANDS.map((band) => (
             <button
@@ -103,7 +104,7 @@ function SecondsField({
   onMs,
 }: {
   label: string
-  hint: string
+  hint: (seconds: number | null) => string
   ms: number
   minMs: number
   maxMs: number
@@ -138,7 +139,7 @@ function SecondsField({
             if (Number.isInteger(parsed) && parsed >= min && parsed <= max) onMs(parsed * 1000)
           }}
         />
-        <span className="field-hint">{hint}</span>
+        <span className="field-hint">{hint(Number.isInteger(Number(draft)) && draft.trim() !== "" ? Number(draft) : null)}</span>
       </span>
     </label>
   )

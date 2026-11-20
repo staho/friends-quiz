@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { t } from "./strings"
 import { onMuteChange, readMuted, writeMuted } from "./sound"
 
 export function MuteButton() {
@@ -13,7 +14,7 @@ export function MuteButton() {
       aria-pressed={muted}
       onClick={() => writeMuted(!muted)}
     >
-      {muted ? "Unmute" : "Mute"}
+      {muted ? t.unmute : t.mute}
     </button>
   )
 }
