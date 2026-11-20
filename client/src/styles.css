@@ -980,3 +980,102 @@ html:-webkit-full-screen body {
   color: #b45f00;
   font-weight: 750;
 }
+
+/* TV lobby: join code and QR on the left, as big as the screen allows; players on the right. */
+@media (min-width: 900px) {
+  .stage.tv .lobby {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "join players"
+      "start players";
+    column-gap: clamp(24px, 4vw, 96px);
+    row-gap: clamp(8px, 2vh, 24px);
+    max-width: none;
+  }
+
+  .stage.tv .lobby .join-row {
+    grid-area: join;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: clamp(10px, 2vh, 28px);
+    min-height: 0;
+    container-type: inline-size;
+  }
+
+  .stage.tv .lobby .join-copy { gap: clamp(4px, 1.2vh, 16px); }
+
+  .stage.tv .lobby .join-copy .hint { font-size: clamp(1.3rem, 3vh, 2.6rem); }
+
+  .stage.tv .lobby .join-url {
+    font-size: clamp(1.5rem, 3.6vh, 3.4rem);
+    font-weight: 650;
+    color: var(--ink);
+  }
+
+  .stage.tv .lobby .code {
+    /* Four letters with their spacing take about 4.9em; the column's width caps the size. */
+    font-size: min(22vh, 19.5cqw);
+    white-space: nowrap;
+  }
+
+  .stage.tv .lobby .join-qr {
+    padding: clamp(8px, 1.4vh, 16px);
+    border-radius: 24px;
+  }
+
+  .stage.tv .lobby .join-qr svg {
+    width: min(36vh, 28vw);
+    height: min(36vh, 28vw);
+  }
+
+  .stage.tv .lobby > .controls { grid-area: start; }
+
+  .stage.tv .lobby > .controls .btn {
+    padding: clamp(12px, 2vh, 22px) clamp(32px, 4vh, 56px);
+    font-size: clamp(1.2rem, 2.8vh, 2rem);
+  }
+
+  .stage.tv .lobby-players {
+    grid-area: players;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(8px, 1.6vh, 18px);
+  }
+
+  .stage.tv .lobby-players > .hint { margin: 0; font-size: clamp(1.2rem, 2.8vh, 2.2rem); }
+
+  .stage.tv .lobby .chips {
+    gap: clamp(6px, 1.2vh, 14px) clamp(8px, 1.2vh, 16px);
+    align-content: flex-start;
+  }
+
+  .stage.tv .lobby .chip {
+    display: flex;
+    align-items: center;
+    padding: 0.35em 0.45em 0.35em 1em;
+    font-size: clamp(1.15rem, 3.2vh, 2.6rem);
+    font-weight: 650;
+  }
+
+  .stage.tv .lobby .chip-x {
+    margin-left: 0.6em;
+    width: 1.7em;
+    height: 1.7em;
+    min-width: 0;
+    padding: 0;
+    display: inline-grid;
+    place-items: center;
+    font-size: 0.85em;
+    line-height: 1;
+  }
+
+  .stage.tv .lobby .chip-x.armed {
+    width: auto;
+    padding: 0 0.8em;
+  }
+}

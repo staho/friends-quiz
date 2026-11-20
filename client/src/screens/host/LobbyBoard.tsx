@@ -69,22 +69,31 @@ function PlayerStrip({
   busy: boolean
   onRemove: (playerId: string) => void
 }) {
-  if (players.length === 0) return <p className="hint">{t.waitingFirst}</p>
+  if (players.length === 0) {
+    return (
+      <div className="lobby-players">
+        <p className="hint">{t.waitingFirst}</p>
+      </div>
+    )
+  }
   return (
-    <ul className="chips">
-      {players.map((player) => (
-        <li key={player.id} className={player.connected ? "chip" : "chip away"}>
-          {player.name}
-          <ConfirmButton
-            label="×"
-            confirmLabel={t.removeConfirm}
-            ariaLabel={fmt(t.removePlayer, { name: player.name })}
-            className="chip-x"
-            disabled={busy}
-            onConfirm={() => onRemove(player.id)}
-          />
-        </li>
-      ))}
-    </ul>
+    <div className="lobby-players">
+      <p className="hint players-count">{t.players(players.length)}</p>
+      <ul className="chips">
+        {players.map((player) => (
+          <li key={player.id} className={player.connected ? "chip" : "chip away"}>
+            {player.name}
+            <ConfirmButton
+              label="×"
+              confirmLabel={t.removeConfirm}
+              ariaLabel={fmt(t.removePlayer, { name: player.name })}
+              className="chip-x"
+              disabled={busy}
+              onConfirm={() => onRemove(player.id)}
+            />
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
