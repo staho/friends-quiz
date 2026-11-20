@@ -33,6 +33,7 @@ import {
 import { sqlStatements } from "../server/sql-script.ts"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
+const TOTAL_POLISH = 250
 
 function openMemory(): DatabaseSync {
   const db = new DatabaseSync(":memory:")
@@ -51,6 +52,12 @@ function migrationFiles(): CatalogMigration[] {
     name,
     sql: readFileSync(path.join(root, "migrations", name), "utf8"),
   }))
+}
+
+function openMigratedRaw(): DatabaseSync {
+  const db = openMemory()
+  applyCatalogMigrations(asMigrationDatabase(db), migrationFiles())
+  return db
 }
 
 function asMigrationDatabase(db: DatabaseSync): MigrationDatabase {
@@ -181,7 +188,7 @@ describe("question catalog", () => {
     const questions = countRows(db, "questions")
     applyCatalogMigrations(asMigrationDatabase(db), migrationFiles())
     assert.equal(categories, 5)
-    assert.equal(questions, 112)
+    assert.equal(questions, 362)
     assert.equal(countRows(db, "categories"), categories)
     assert.equal(countRows(db, "questions"), questions)
     assert.equal(countRows(db, "question_stats"), 0)
@@ -193,21 +200,87 @@ describe("question catalog", () => {
     )
   })
 
-  it("fills every category and difficulty with at least four questions", async () => {
+  it("fills every category and difficulty with eight to ten Polish questions", async () => {
     const db = openMigrated()
     const categories = await listCategories(db)
     assert.deepEqual(
       categories.map((category) => category.id),
-      ["common", "geography", "history", "movies", "science"],
+      ["movies", "geography", "history", "science", "common"],
     )
     const pack = await listQuestions(db)
-    assert.equal(pack.length, 112)
     for (const category of categories) {
       for (let difficulty = 1; difficulty <= 5; difficulty += 1) {
         const cell = pack.filter((item) => item.category === category.id && item.difficulty === difficulty)
-        assert.ok(cell.length >= 4, `${category.id} level ${difficulty} has ${cell.length}`)
+        assert.ok(cell.length >= 8 && cell.length <= 10, `${category.id} level ${difficulty} has ${cell.length}`)
       }
     }
+    assert.equal(pack.length, TOTAL_POLISH)
+    assert.ok(pack.every((item) => item.id.startsWith("pl-")))
+  })
+
+  it("retires the English bank without deleting it", () => {
+    const db = openMigratedRaw()
+    const english = db.prepare("SELECT id, active FROM questions WHERE substr(id,1,3) <> 'pl-'").all() as {
+      id: string
+      active: number
+    }[]
+    assert.equal(english.length, 112)
+    assert.ok(english.every((row) => Number(row.active) === 0))
+    const active = db.prepare("SELECT id FROM questions WHERE active = 1").all() as { id: string }[]
+    assert.ok(active.length > 0)
+    assert.ok(active.every((row) => row.id.startsWith("pl-")))
+    const labels = db.prepare("SELECT id, label FROM categories").all() as { id: string; label: string }[]
+    assert.deepEqual(Object.fromEntries(labels.map((row) => [row.id, row.label])), {
+      geography: "Geografia",
+      science: "Nauka i przyroda",
+      common: "Wiedza ogólna",
+      movies: "Film i seriale",
+      history: "Historia",
+    })
+  })
+
+  it("keeps every Polish question well formed", async () => {
+    const pack = await listQuestions(openMigrated())
+    const idPattern = /^pl-(geography|science|common|movies|history)-[a-z0-9]+(-[a-z0-9]+)*$/
+    const banned = /(^|[^\p{L}])(obecnie|aktualnie|teraz|dziś|dzisiaj|najnowsz\p{L}*|w tym roku)(?![\p{L}])/iu
+    const ids = new Set<string>()
+    const prompts = new Set<string>()
+    const negatives = new Map<string, number>()
+    for (const item of pack) {
+      const match = idPattern.exec(item.id)
+      assert.ok(match, item.id)
+      assert.equal(match[1], item.category, item.id)
+      assert.ok(item.id.length <= 48, item.id)
+      assert.equal(ids.has(item.id), false, `duplicate id ${item.id}`)
+      ids.add(item.id)
+      assert.ok(item.prompt.length <= 110, `${item.id} prompt is ${item.prompt.length} characters`)
+      assert.ok(item.prompt.endsWith("?"), item.id)
+      assert.equal(item.prompt, item.prompt.normalize("NFC"), item.id)
+      assert.ok(!/["\n;]/.test(item.prompt), item.id)
+      assert.ok(!banned.test(item.prompt), item.id)
+      const key = item.prompt.toLocaleLowerCase("pl")
+      assert.equal(prompts.has(key), false, `duplicate prompt ${item.id}`)
+      prompts.add(key)
+      const unique = new Set(item.choices.map((text) => text.trim().toLocaleLowerCase("pl")))
+      assert.equal(unique.size, 4, item.id)
+      for (const text of item.choices) {
+        assert.ok(text.length <= 32, `${item.id} answer "${text}" is ${text.length} characters`)
+        assert.equal(text, text.normalize("NFC"), item.id)
+        assert.ok(!text.includes('"'), item.id)
+        assert.ok(!/wszystkie powyższe|żadne z powyższych/iu.test(text), item.id)
+      }
+      const answer = item.choices[item.correctIndex]
+      assert.ok(answer)
+      if (answer.length >= 4) {
+        assert.ok(!item.prompt.toLocaleLowerCase("pl").includes(answer.toLocaleLowerCase("pl")), `${item.id} gives its answer away`)
+      }
+      if (/\bNIE\b/.test(item.prompt)) {
+        assert.ok(item.difficulty >= 3, `${item.id} is a negative question below level 3`)
+        const cell = `${item.category}:${item.difficulty}`
+        negatives.set(cell, (negatives.get(cell) ?? 0) + 1)
+      }
+    }
+    for (const [cell, count] of negatives) assert.ok(count <= 1, `${cell} has ${count} negative questions`)
   })
 
   it("stays inside a difficulty band", async () => {
@@ -378,9 +451,9 @@ describe("catalog queries inside a long-running room", () => {
 
   it("takes the label from the categories table", async () => {
     const { db, raw } = openCounted()
-    raw.prepare("UPDATE categories SET label = 'Etykieta testowa' WHERE id = (SELECT category FROM questions WHERE id = 'paris')").run()
-    const [paris] = await listQuestions(db, { ids: ["paris"] })
-    assert.equal(paris?.categoryLabel, "Etykieta testowa")
+    raw.prepare("UPDATE categories SET label = 'Etykieta testowa' WHERE id = (SELECT category FROM questions WHERE id = 'pl-geography-stolica-polski')").run()
+    const [capital] = await listQuestions(db, { ids: ["pl-geography-stolica-polski"] })
+    assert.equal(capital?.categoryLabel, "Etykieta testowa")
     const rows = [
       { id: "x", prompt: "P", category: "c", category_label: null, difficulty: 1, position: 0, text: "a", is_correct: 1 },
       { id: "x", prompt: "P", category: "c", category_label: null, difficulty: 1, position: 1, text: "b", is_correct: 0 },

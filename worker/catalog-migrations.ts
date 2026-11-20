@@ -9,6 +9,12 @@ import sql_0006_science_sql from "../migrations/0006_science.sql"
 import sql_0007_common_sql from "../migrations/0007_common.sql"
 import sql_0008_movies_sql from "../migrations/0008_movies.sql"
 import sql_0009_history_sql from "../migrations/0009_history.sql"
+import sql_0010_polish_switch_sql from "../migrations/0010_polish_switch.sql"
+import sql_0011_pl_geography_sql from "../migrations/0011_pl_geography.sql"
+import sql_0012_pl_science_sql from "../migrations/0012_pl_science.sql"
+import sql_0013_pl_common_sql from "../migrations/0013_pl_common.sql"
+import sql_0014_pl_movies_sql from "../migrations/0014_pl_movies.sql"
+import sql_0015_pl_history_sql from "../migrations/0015_pl_history.sql"
 
 export const MIGRATIONS: CatalogMigration[] = [
   { name: "0001_questions.sql", sql: sql_0001_questions_sql },
@@ -20,4 +26,10 @@ export const MIGRATIONS: CatalogMigration[] = [
   { name: "0007_common.sql", sql: sql_0007_common_sql },
   { name: "0008_movies.sql", sql: sql_0008_movies_sql },
   { name: "0009_history.sql", sql: sql_0009_history_sql },
+  { name: "0010_polish_switch.sql", sql: sql_0010_polish_switch_sql },
+  { name: "0011_pl_geography.sql", sql: sql_0011_pl_geography_sql },
+  { name: "0012_pl_science.sql", sql: sql_0012_pl_science_sql },
+  { name: "0013_pl_common.sql", sql: sql_0013_pl_common_sql },
+  { name: "0014_pl_movies.sql", sql: sql_0014_pl_movies_sql },
+  { name: "0015_pl_history.sql", sql: sql_0015_pl_history_sql },
 ]

@@ -1,59 +1,72 @@
 # Question coverage
 
-A friends pub quiz. Each cell should have at least 4 active questions. The original 24 questions stay, so level 1 is thicker in Science and Common knowledge. The bank has 112 questions.
+Polish bank. Each category × difficulty cell holds 10 active questions (about half Poland or Central Europe, half world): 250 in all. The 112 English questions from migrations 0002–0009 are retired with `active = 0` in `0010_polish_switch.sql` and are never deleted, because `question_stats` and `question_plays` reference them.
 
-Difficulty:
+## Difficulty
 
-- **1 Warm-up.** Almost everyone gets it.
-- **2 Easy.** Familiar facts most adults know.
-- **3 Medium.** Ordinary pub-quiz recall.
-- **4 Hard.** One or two people at the table are likely to know it.
-- **5 Expert.** A specific, checkable fact.
+Calibrated for a table of Polish adults aged 25–50 with mixed education. The percentage is the share who know the answer, not the share who guess it. Difficulty comes from what is asked and from how close the wrong answers are.
 
-A round of 10 takes two questions from each level, in order from 1 to 5. Categories stay mixed.
+| Level | Name | Who knows it | Wrong answers |
+| --- | --- | --- | --- |
+| 1 | Rozgrzewka | 90% or more | Same type, but obviously wrong to anyone who knows the topic |
+| 2 | Łatwe | 70–90% | One plausible rival |
+| 3 | Średnie | 40–70% | Two plausible rivals |
+| 4 | Trudne | 20–40% | All three plausible, including a trap |
+| 5 | Ekspert | 5–20% | Near misses from the same set |
 
-## Geography
+A question belongs to the lowest level where it fits. Level 1 asks nothing that must be recalled exactly. Levels 1–2 have no year and no negative ("NIE") questions. A round of 10 takes two questions from each level, in order from 1 to 5, and categories stay mixed.
 
-- Level 1: done (4) — continents, paris, pacific, italy
-- Level 2: done (4)
-- Level 3: done (4)
-- Level 4: done (4)
-- Level 5: done (4)
+## Rules for new questions
 
-## Science
+- Natural Polish with full diacritics (NFC), titles in „…”, Polish exonyms and Polish film titles. One question per prompt, ending in `?`.
+- Prompt up to 110 characters (aim for 90). Each answer up to 32 characters (aim for 24). Four distinct answers of the same kind and similar length.
+- Exactly one defensible answer. No joke answers, no "wszystkie powyższe". The prompt must not contain the answer.
+- No dating words (obecnie, aktualnie, teraz, dziś, najnowsz-, w tym roku), no office holders, no changeable records, nothing after 2020, no contested facts.
+- Ids are `pl-<category>-<slug>`, at most 48 characters, with no level inside, so a later re-levelling does not leave a misleading id.
+- No question may give away another. Each recurring topic has one owning category: music, literature, sport and Polish language in Wiedza ogólna; science figures and animals in Nauka i przyroda; Polish film people in Film i seriale; Polish and world events in Historia; places in Geografia.
+- Per cell: at most 1 negative question, at most 3 numeric answers, at most 3 questions on one sub-topic.
+- The catalog tests enforce the format rules, 8 to 10 questions per cell, and the Polish labels.
 
-- Level 1: done (6) — closest-planet, co2, water, diamond, freeze, mercury-metal
-- Level 2: done (4)
-- Level 3: done (4)
-- Level 4: done (4)
-- Level 5: done (4)
+## Geografia
 
-## Common knowledge
+- Level 1: 10
+- Level 2: 10
+- Level 3: 10
+- Level 4: 10
+- Level 5: 10
 
-Level 1 keeps the everyday questions from the old Arts, Food, Language, Math, Nature, Sports, and General categories, plus sunrise.
+## Nauka i przyroda
 
-- Level 1: done (14) — sunrise, hexagon, nectar, hour, piano, soccer, kangaroo, alphabet, guacamole, leap-year, ruby, elephant, puppy, thousand
-- Level 2: done (4)
-- Level 3: done (4)
-- Level 4: done (4)
-- Level 5: done (4)
+- Level 1: 10
+- Level 2: 10
+- Level 3: 10
+- Level 4: 10
+- Level 5: 10
 
-## Movies
+## Wiedza ogólna
 
-- Level 1: done (4)
-- Level 2: done (4)
-- Level 3: done (4)
-- Level 4: done (4)
-- Level 5: done (4)
+- Level 1: 10
+- Level 2: 10
+- Level 3: 10
+- Level 4: 10
+- Level 5: 10
 
-## History
+## Film i seriale
 
-- Level 1: done (4)
-- Level 2: done (4)
-- Level 3: done (4)
-- Level 4: done (4)
-- Level 5: done (4)
+- Level 1: 10
+- Level 2: 10
+- Level 3: 10
+- Level 4: 10
+- Level 5: 10
+
+## Historia
+
+- Level 1: 10
+- Level 2: 10
+- Level 3: 10
+- Level 4: 10
+- Level 5: 10
 
 ## Still missing
 
-Nothing inside the 4-per-cell target. Later growth means raising a cell above four and adding another migration. Do not edit `migrations/0002_seed.sql`. That file has already been applied.
+Nothing. To grow a cell, add a new migration file. Never edit an applied migration (0001–0015).
