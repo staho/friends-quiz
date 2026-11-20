@@ -8,6 +8,7 @@
     "build": "vite build --config client/vite.config.ts",
     "deploy": "npm run build && wrangler deploy",
     "test": "node --import tsx --test test/*.test.ts",
+    "test:worker": "node --import tsx --test --test-concurrency=1 test/worker/*.test.ts",
     "check": "node scripts/catalog-migrations.mjs && tsc -p tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit",
     "types": "wrangler types"
   },

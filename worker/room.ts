@@ -1,25 +1,30 @@
 import { DurableObject } from "cloudflare:workers"
 import type { ErrorCode } from "../shared/errors.ts"
-import { type HostSession, type PlayerSession } from "../shared/types.ts"
+import { MAX_JOINS_PER_SOCKET, type HostSession, type PlayerSession } from "../shared/types.ts"
 import { parseClientMessage, type ClientMessage } from "../shared/wire.ts"
 import {
   GameError,
   advanceDue,
   alarmAt,
   applyTick,
+  clearStall,
   createRoom,
   difficultyBounds,
   difficultyForSlot,
   endGame,
+  expiresAt,
   joinPlayer,
+  leavePlayer,
   lockAnswer,
   nextQuestion,
   normalizeName,
   reconnectPlayer,
+  removePlayer,
   resetRound,
   restoreRoom,
   setPlayerConnected,
   snapshotFor,
+  stallAdvance,
   startGame,
   submitChoice,
   takeFromDeck,
@@ -29,30 +34,46 @@ import {
   type Question,
   type Room,
 } from "../server/game.ts"
+import { createSerialQueue } from "../server/serial.ts"
 
-type Seat = { role: "host" } | { role: "player"; playerId: string }
+type Seat =
+  | { role: "host"; joins: number }
+  | { role: "player"; playerId: string; joins: number }
+  | { role: "guest"; joins: number }
 
 export class RoomDurableObject extends DurableObject<Env> {
+  // Every entry point runs inside this queue, so one task finishes (including
+  // its awaits) before the next one reads the room.
+  private readonly serial = createSerialQueue()
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     ctx.blockConcurrencyWhile(async () => {
-      this.ctx.storage.sql.exec(`
-        CREATE TABLE IF NOT EXISTS room (
-          id INTEGER PRIMARY KEY CHECK (id = 1),
-          data TEXT NOT NULL
-        )
-      `)
+      this.ensureTable()
     })
+    // Answers the client heartbeat without waking the object.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"))
   }
 
-  async open(input: { code: string; hostToken: string }): Promise<HostSession | null> {
-    if (this.readRoom()) return null
-    const room = createRoom({
-      code: input.code,
-      hostToken: input.hostToken,
+  private ensureTable(): void {
+    this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS room (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        data TEXT NOT NULL
+      )
+    `)
+  }
+
+  open(input: { code: string; hostToken: string }): Promise<HostSession | null> {
+    return this.serial(async () => {
+      if (this.readRoom()) return null
+      const room = createRoom({
+        code: input.code,
+        hostToken: input.hostToken,
+      })
+      await this.commit(room, Date.now())
+      return { code: room.code, hostToken: room.hostToken }
     })
-    this.writeRoom(room)
-    return { code: room.code, hostToken: room.hostToken }
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -79,24 +100,26 @@ export class RoomDurableObject extends DurableObject<Env> {
       if (id) ws.send(JSON.stringify({ id, ok: false, error: "bad_request" }))
       return
     }
-    try {
-      const data = await this.handle(ws, command)
-      ws.send(JSON.stringify({ id: command.id, ok: true, data }))
-    } catch (error) {
-      const code: ErrorCode = error instanceof GameError ? error.code : "server_error"
-      if (!(error instanceof GameError)) console.error(error)
-      ws.send(JSON.stringify({ id: command.id, ok: false, error: code }))
-    }
+    await this.serial(async () => {
+      try {
+        const data = await this.handle(ws, command)
+        ws.send(JSON.stringify({ id: command.id, ok: true, data }))
+      } catch (error) {
+        const code: ErrorCode = error instanceof GameError ? error.code : "server_error"
+        if (!(error instanceof GameError)) console.error(error)
+        ws.send(JSON.stringify({ id: command.id, ok: false, error: code }))
+      }
+    })
   }
 
   async webSocketClose(ws: WebSocket): Promise<void> {
-    await this.releaseSeat(ws)
+    await this.serial(() => this.releaseSeat(ws))
   }
 
   async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
     console.error(error)
     try {
-      await this.releaseSeat(ws)
+      await this.serial(() => this.releaseSeat(ws))
     } finally {
       try {
         ws.close()
@@ -107,22 +130,44 @@ export class RoomDurableObject extends DurableObject<Env> {
   }
 
   async alarm(): Promise<void> {
-    const room = this.readRoom()
-    if (!room) return
-    const now = Date.now()
-    let next = applyTick(room, now)
-    if (advanceDue(next, now)) {
-      const dealt =
-        next.asked.length >= next.questionLimit
-          ? { room: next, question: null }
-          : await this.dealOrFinish(next)
-      next = applyTick(nextQuestion(dealt.room, dealt.question, now), now)
-    }
-    if (next === room) {
-      await this.arm(room)
-      return
-    }
-    await this.commit(next, now)
+    await this.serial(async () => {
+      const room = this.readRoom()
+      if (!room) return
+      const now = Date.now()
+      if (alarmAt(room) == null) {
+        // Expiry alarm: delete a room that has been idle for the whole TTL.
+        const expiry = expiresAt(room)
+        if (expiry != null && now >= expiry) {
+          if (this.openSockets() > 0) {
+            await this.commit(room, now)
+            return
+          }
+          await this.ctx.storage.deleteAlarm()
+          await this.ctx.storage.deleteAll()
+          this.ensureTable()
+          return
+        }
+        await this.arm(room)
+        return
+      }
+      const ticked = applyTick(room, now)
+      if (!advanceDue(ticked, now)) {
+        if (ticked === room) await this.arm(room)
+        else await this.commit(ticked, now)
+        return
+      }
+      try {
+        const dealt =
+          ticked.asked.length >= ticked.questionLimit
+            ? { room: ticked, question: null }
+            : await this.dealOrFinish(ticked)
+        await this.commit(clearStall(applyTick(nextQuestion(dealt.room, dealt.question, now), now)), now)
+      } catch (error) {
+        console.error(error)
+        // Retry in DEAL_RETRY_MS; the host sees `stalled` meanwhile.
+        await this.commit(stallAdvance(ticked, now), now)
+      }
+    })
   }
 
   private async handle(ws: WebSocket, message: ClientMessage): Promise<unknown> {
@@ -133,15 +178,17 @@ export class RoomDurableObject extends DurableObject<Env> {
         this.requireHost(ws)
         await this.mutate(async (room, now) => {
           const dealt = await this.deal(room)
-          return startGame(dealt.room, dealt.question, now)
+          return clearStall(startGame(dealt.room, dealt.question, now))
         })
         return null
       case "host:next":
         this.requireHost(ws)
         await this.mutate(async (room, now) => {
-          if (room.asked.length >= room.questionLimit) return nextQuestion(room, null, now)
+          // A second press while the next question is already ready changes nothing.
+          if (room.phase === "ready") return room
+          if (room.asked.length >= room.questionLimit) return clearStall(nextQuestion(room, null, now))
           const dealt = await this.dealOrFinish(room)
-          return nextQuestion(dealt.room, dealt.question, now)
+          return clearStall(nextQuestion(dealt.room, dealt.question, now))
         })
         return null
       case "host:pause":
@@ -160,7 +207,12 @@ export class RoomDurableObject extends DurableObject<Env> {
         this.requireHost(ws)
         await this.mutate((room, now) => updateSettings(room, message.payload, now))
         return null
+      case "host:remove":
+        this.requireHost(ws)
+        await this.mutate((room) => removePlayer(room, message.payload.playerId))
+        return null
       case "player:join":
+        this.countJoin(ws)
         return this.join(ws, message.payload)
       case "player:attach":
         return this.attachPlayer(ws, message.payload)
@@ -174,6 +226,12 @@ export class RoomDurableObject extends DurableObject<Env> {
         await this.mutate((room, now) => lockAnswer(room, player.playerId, now))
         return null
       }
+      case "player:leave": {
+        const player = this.requirePlayer(ws)
+        await this.mutate((room) => leavePlayer(room, player.playerId))
+        ws.serializeAttachment({ role: "guest", joins: joinsOf(ws) } satisfies Seat)
+        return null
+      }
       default:
         throw new GameError("bad_request")
     }
@@ -185,7 +243,7 @@ export class RoomDurableObject extends DurableObject<Env> {
     if (!room || room.hostToken !== payload.hostToken || room.code !== code) {
       throw new GameError("room_not_found")
     }
-    ws.serializeAttachment({ role: "host" } satisfies Seat)
+    ws.serializeAttachment({ role: "host", joins: joinsOf(ws) } satisfies Seat)
     const now = Date.now()
     await this.commit(applyTick(room, now), now)
     return { code: room.code, hostToken: room.hostToken }
@@ -213,7 +271,7 @@ export class RoomDurableObject extends DurableObject<Env> {
       throw error
     }
     const next = applyTick(joined.room, now)
-    ws.serializeAttachment({ role: "player", playerId: joined.player.id } satisfies Seat)
+    ws.serializeAttachment({ role: "player", playerId: joined.player.id, joins: joinsOf(ws) } satisfies Seat)
     await this.commit(next, now)
     return {
       code,
@@ -243,7 +301,7 @@ export class RoomDurableObject extends DurableObject<Env> {
     const next = applyTick(reconnected, now)
     const player = next.players.find((item) => item.id === payload.playerId)
     if (!player) throw new GameError("rejoin")
-    ws.serializeAttachment({ role: "player", playerId: player.id } satisfies Seat)
+    ws.serializeAttachment({ role: "player", playerId: player.id, joins: joinsOf(ws) } satisfies Seat)
     await this.commit(next, now)
     return { code, playerId: player.id, token: player.token, name: player.name }
   }
@@ -259,26 +317,10 @@ export class RoomDurableObject extends DurableObject<Env> {
     const slot = difficultyForSlot(room.asked.length)
     const target = bounds ? Math.min(bounds.maxDifficulty, Math.max(bounds.minDifficulty, slot)) : slot
     const catalog = this.env.CATALOG.getByName("questions")
-    const dealt = await takeFromDeck(room, target, bounds, (excludeIds, difficulty, pickBounds) => {
-      return catalog.pickRandom([...excludeIds], difficulty, pickBounds) as Promise<Question | null>
+    // takeFromDeck returns a shuffled copy that still carries category and categoryLabel.
+    return takeFromDeck(room, target, bounds, (excludeIds, difficulty, pickBounds, categoryCounts) => {
+      return catalog.pickRandom([...excludeIds], difficulty, pickBounds, categoryCounts) as Promise<Question | null>
     })
-    const picked = dealt.question
-    if (!picked || picked.choices.length !== 4) return { room: dealt.room, question: null }
-    const [first, second, third, fourth] = picked.choices
-    if (first == null || second == null || third == null || fourth == null) {
-      return { room: dealt.room, question: null }
-    }
-    return {
-      room: dealt.room,
-      question: {
-        id: picked.id,
-        prompt: picked.prompt,
-        choices: [first, second, third, fourth],
-        correctIndex: picked.correctIndex,
-        category: picked.category,
-        difficulty: picked.difficulty,
-      },
-    }
   }
 
   private async mutate(run: (room: Room, now: number) => Room | Promise<Room>): Promise<void> {
@@ -297,33 +339,35 @@ export class RoomDurableObject extends DurableObject<Env> {
   }
 
   private async commit(room: Room, now: number): Promise<void> {
-    const flushed = await this.flushPlays(room)
-    this.writeRoom(flushed)
-    await this.arm(flushed)
-    this.broadcast(flushed, now)
+    const stamped: Room = { ...room, lastActivityAt: now }
+    this.writeRoom(stamped)
+    await this.arm(stamped)
+    this.broadcast(stamped, now)
+    if (stamped.pendingPlays.length > 0) void this.serial(() => this.flushPlays())
   }
 
-  private async flushPlays(room: Room): Promise<Room> {
-    if (room.pendingPlays.length === 0) return room
-    const accepted: string[] = []
+  // Records finished plays with the catalog after the room is saved and sent, so a
+  // slow catalog never delays the table. It works on a fresh copy of the room.
+  private async flushPlays(): Promise<void> {
+    const room = this.readRoom()
+    if (!room || room.pendingPlays.length === 0) return
+    const accepted = new Set<string>()
     try {
       for (const play of room.pendingPlays) {
         await this.env.CATALOG.getByName("questions").recordPlay(play)
-        accepted.push(play.playId)
+        accepted.add(play.playId)
       }
     } catch (error) {
       console.error(error)
     }
-    if (accepted.length === 0) return room
-    const acceptedIds = new Set(accepted)
-    return {
-      ...room,
-      pendingPlays: room.pendingPlays.filter((play) => !acceptedIds.has(play.playId)),
-    }
+    if (accepted.size === 0) return
+    const fresh = this.readRoom()
+    if (!fresh) return
+    this.writeRoom({ ...fresh, pendingPlays: fresh.pendingPlays.filter((play) => !accepted.has(play.playId)) })
   }
 
   private async arm(room: Room): Promise<void> {
-    const deadline = alarmAt(room)
+    const deadline = alarmAt(room) ?? expiresAt(room)
     if (deadline == null) {
       await this.ctx.storage.deleteAlarm()
       return
@@ -336,7 +380,7 @@ export class RoomDurableObject extends DurableObject<Env> {
     for (const ws of this.ctx.getWebSockets()) {
       try {
         const seat = readSeat(ws)
-        if (!seat) continue
+        if (!seat || seat.role === "guest") continue
         const snapshot = snapshotFor(
           room,
           seat.role === "player" ? { role: "player", playerId: seat.playerId } : { role: "host" },
@@ -361,6 +405,18 @@ export class RoomDurableObject extends DurableObject<Env> {
     const now = Date.now()
     const next = applyTick(setPlayerConnected(room, seat.playerId, false), now)
     await this.commit(next, now)
+  }
+
+  private openSockets(): number {
+    return this.ctx.getWebSockets().filter((socket) => socket.readyState === WebSocket.OPEN).length
+  }
+
+  // Counts every join attempt on this socket, successful or not.
+  private countJoin(ws: WebSocket): void {
+    const seat = readSeat(ws) ?? { role: "guest" as const, joins: 0 }
+    const joins = seat.joins + 1
+    ws.serializeAttachment({ ...seat, joins } satisfies Seat)
+    if (joins > MAX_JOINS_PER_SOCKET) throw new GameError("too_many_joins")
   }
 
   private openPlayerIds(except?: WebSocket): Set<string> {
@@ -408,9 +464,17 @@ export class RoomDurableObject extends DurableObject<Env> {
 }
 
 function readSeat(ws: WebSocket): Seat | null {
-  const seat = ws.deserializeAttachment() as Seat | null
-  if (!seat || (seat.role !== "host" && seat.role !== "player")) return null
-  return seat
+  const raw = ws.deserializeAttachment() as Partial<Seat> | null
+  if (!raw || (raw.role !== "host" && raw.role !== "player" && raw.role !== "guest")) return null
+  const joins = typeof raw.joins === "number" && Number.isFinite(raw.joins) ? raw.joins : 0
+  if (raw.role === "player") {
+    return typeof raw.playerId === "string" ? { role: "player", playerId: raw.playerId, joins } : null
+  }
+  return { role: raw.role, joins }
+}
+
+function joinsOf(ws: WebSocket): number {
+  return readSeat(ws)?.joins ?? 0
 }
 
 function newToken(): string {

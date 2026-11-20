@@ -39,7 +39,7 @@ export interface Question {
   choices: [string, string, string, string]
   correctIndex: ChoiceIndex
   category: string
-  categoryLabel?: string
+  categoryLabel: string
   difficulty: number
 }
 
@@ -404,7 +404,7 @@ function readAsked(value: StoredRoom, phase: Room["phase"], legacy: Question[] |
   return legacy.slice(0, (value.questionIndex ?? 0) + 1).map(withCategoryLabel)
 }
 
-function withCategoryLabel(q: Question): Question {
+function withCategoryLabel(q: Omit<Question, "categoryLabel"> & { categoryLabel?: unknown }): Question {
   return { ...q, categoryLabel: typeof q.categoryLabel === "string" ? q.categoryLabel : "" }
 }
 
@@ -811,7 +811,7 @@ export function snapshotFor(room: Room, viewer: Viewer, now: number, lanAddresse
           durationMs: room.activeDurationMs,
           remainingMs: remainingMs(room, now),
           difficulty: question.difficulty,
-          category: question.categoryLabel ?? "",
+          category: question.categoryLabel,
         }
       : null,
     ready: readyView(room, now),
