@@ -7,6 +7,7 @@ import {
   playerCues,
   type HostFrame,
 } from "../client/src/cues.ts"
+import { podiumSteps } from "../client/src/screens/host/podium.ts"
 import type {
   ChoiceIndex,
   PlayerView,
@@ -288,11 +289,11 @@ describe("host cues", () => {
     assert.deepEqual(hostCues(shown, shown), [])
   })
 
-  it("plays the podium sting once when the table is final", () => {
+  it("leaves the podium sting to the final board", () => {
     const shown = frame(room({ phase: "reveal", reveal: reveal([result("ada")]) }))
     const final = frame(room({ phase: "finished", players: [player("ada", { score: 800 })] }))
     const held = frame(room({ phase: "finished", players: [player("ada", { score: 800 })] }))
-    assert.deepEqual(hostCues(shown, final), ["podium"])
+    assert.deepEqual(hostCues(shown, final), [])
     assert.deepEqual(hostCues(final, held), [])
   })
 
@@ -382,5 +383,33 @@ describe("player cues", () => {
       you: you({ choiceIndex: 1, locked: true, score: 800 }),
     })
     assert.deepEqual(playerCues(open, shown), ["lock", "correct"])
+  })
+})
+
+describe("podium steps", () => {
+  const ranked = (id: string, rank: number, score = 100) => player(id, { rank, score })
+
+  it("gives each of the first three ranks a step", () => {
+    const steps = podiumSteps([ranked("d", 4, 40), ranked("b", 2, 80), ranked("a", 1, 90), ranked("c", 3, 60)])
+    assert.deepEqual(steps.map((s) => [s.place, s.players.map((p) => p.id)]), [
+      [1, ["a"]],
+      [2, ["b"]],
+      [3, ["c"]],
+    ])
+  })
+
+  it("shares a step between tied players and skips the ranks they cover", () => {
+    const steps = podiumSteps([ranked("a", 1), ranked("b", 1), ranked("c", 3, 50), ranked("d", 4, 40)])
+    assert.deepEqual(steps.map((s) => [s.place, s.players.map((p) => p.id)]), [
+      [1, ["a", "b"]],
+      [3, ["c"]],
+    ])
+  })
+
+  it("copes with fewer than three players and with nobody scoring", () => {
+    assert.deepEqual(podiumSteps([]), [])
+    assert.deepEqual(podiumSteps([ranked("a", 1)]).map((s) => s.place), [1])
+    assert.deepEqual(podiumSteps([ranked("a", 1), ranked("b", 2, 10)]).map((s) => s.place), [1, 2])
+    assert.deepEqual(podiumSteps([ranked("a", 1, 0), ranked("b", 1, 0)]), [])
   })
 })

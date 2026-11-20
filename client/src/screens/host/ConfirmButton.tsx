@@ -6,12 +6,14 @@ const ARM_MS = 4000
 export function ConfirmButton({
   label,
   confirmLabel,
+  ariaLabel,
   onConfirm,
   disabled,
   className = "btn ghost",
 }: {
   label: string
   confirmLabel: string
+  ariaLabel?: string
   onConfirm: () => void
   disabled?: boolean
   className?: string
@@ -33,6 +35,7 @@ export function ConfirmButton({
       type="button"
       className={armed ? `${className} armed` : className}
       disabled={disabled}
+      aria-label={armed ? undefined : ariaLabel}
       onBlur={() => setArmed(false)}
       onClick={() => {
         if (!armed) {

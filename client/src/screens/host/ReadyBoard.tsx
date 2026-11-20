@@ -1,6 +1,6 @@
 import type { RoomSettings, RoomSnapshot } from "@shared/types"
 import { useCountdown } from "../../useCountdown"
-import { t } from "../../strings"
+import { fmt, t } from "../../strings"
 import { ConfirmButton } from "./ConfirmButton"
 import { RoundSettings } from "./HostSettings"
 
@@ -21,7 +21,12 @@ export function ReadyBoard({
   const count = Math.max(1, Math.ceil(left / 1000))
   return (
     <section className="board">
-      <p className="kicker">{t.questionOf(ready.index + 1, ready.total)}</p>
+      <div className="kicker-row">
+        <p className="kicker">{t.questionOf(ready.index + 1, ready.total)}</p>
+        {ready.category !== "" && (
+          <span className="category-chip">{fmt(t.nextCategory, { category: t.categoryLabel(ready.category) })}</span>
+        )}
+      </div>
       <h1 className="prompt">{t.getReady}</h1>
       <p className="ready-count" aria-live="polite">
         {count}

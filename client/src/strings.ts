@@ -35,6 +35,14 @@ const playersWord = (n: number) => plural(n, "gracz", "gracze", "graczy")
 const pointsWord = (n: number) => plural(n, "punkt", "punkty", "punktów")
 const wholeSeconds = (n: number) => `${n}${NBSP}s`
 
+const CATEGORY_LABELS: Record<string, string> = {
+  geography: "Geografia",
+  science: "Nauka i przyroda",
+  common: "Wiedza ogólna",
+  movies: "Film i seriale",
+  history: "Historia",
+}
+
 export const t = {
   // --- server errors ---
   errRoomNotFound: "Nie ma takiego pokoju. Sprawdź kod.",
@@ -155,6 +163,16 @@ export const t = {
   // --- end WP4 connection ---
 
   // --- WP5 TV data ---
+  pickedBy: "Wybrało: {n}",
+  joinedLate: "dołączenie w trakcie",
+  nextCategory: "Następna: {category}",
+  removePlayer: "Usuń gracza {name}",
+  removeConfirm: "Usunąć?",
+  dealRetrying: "Nie udało się wczytać następnego pytania, próbuję jeszcze raz…",
+  podiumTitle: "Podium",
+  moveUp: "w górę o {n}",
+  moveDown: "w dół o {n}",
+  categoryLabel: (id: string) => CATEGORY_LABELS[id] ?? id,
   // --- end WP5 TV data ---
 
   // --- WP6 phone ---

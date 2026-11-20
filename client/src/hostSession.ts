@@ -1,4 +1,5 @@
 import type { HostSession } from "@shared/types"
+import { ROOM_TTL_MS } from "../../shared/types.ts"
 import { pruneOlderThan, readJson, removeKey, writeJson } from "./storage"
 
 /** The host session of one room, as kept in localStorage. */
@@ -14,8 +15,8 @@ const PREFIX = "fq:host:"
 const LAST_KEY = `${PREFIX}last`
 const LEGACY_KEY = "friends-quiz-host"
 
-/** A room is deleted after two days idle (ROOM_TTL_MS in WP1); sessions are kept one day longer. */
-const HOST_KEEP_MS = 2 * 24 * 3_600_000 + 86_400_000
+/** A room is deleted after ROOM_TTL_MS idle; sessions are kept one day longer. */
+const HOST_KEEP_MS = ROOM_TTL_MS + 86_400_000
 
 const hostKey = (code: string) => `${PREFIX}${code}`
 
