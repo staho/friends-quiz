@@ -22,8 +22,9 @@ export class CatalogDurableObject extends DurableObject<Env> {
     excludeIds: string[],
     difficulty?: number,
     bounds?: { minDifficulty: number; maxDifficulty: number },
+    categoryCounts?: Record<string, number>,
   ): Promise<Question | null> {
-    return pickRandomQuestion(sqliteDatabase(this.ctx.storage.sql), excludeIds, difficulty, bounds)
+    return pickRandomQuestion(sqliteDatabase(this.ctx.storage.sql), excludeIds, difficulty, bounds, categoryCounts)
   }
 
   async recordPlay(play: QuestionPlay): Promise<boolean> {

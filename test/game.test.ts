@@ -1,10 +1,27 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { BASE_POINTS, MAX_SPEED_BONUS, NEXT_TIME_DEFAULT_MS, READY_DURATION_MS, type RoomSettings } from "../shared/types.ts"
+import {
+  BASE_POINTS,
+  DEAL_RETRY_MS,
+  MAX_SPEED_BONUS,
+  NEXT_TIME_DEFAULT_MS,
+  READY_DURATION_MS,
+  ROOM_TTL_MS,
+  type RoomSettings,
+} from "../shared/types.ts"
 import {
   GameError,
   advanceDue,
   alarmAt,
+  clearStall,
+  competitionRanks,
+  expiresAt,
+  leavePlayer,
+  normalizeName,
+  reconnectPlayer,
+  removePlayer,
+  setPlayerConnected,
+  stallAdvance,
   toggleAdvancePause,
   applyTick,
   createRoom,
@@ -38,6 +55,7 @@ function question(id: string, correctIndex: 0 | 1 | 2 | 3): Question {
     choices: ["Red", "Blue", "Gold", "Green"],
     correctIndex,
     category: "general",
+    categoryLabel: "General",
     difficulty: 1,
   }
 }
@@ -138,10 +156,286 @@ describe("joining", () => {
     assert.throws(() => joinPlayer(present, { id: "p2", name: "ada", token: "new" }), /name_taken/)
   })
 
-  it("refuses a new player after the round starts", () => {
+  it("lets a player join after the round starts and starts them on 0 points", () => {
     let room = addPlayer(roomWith(), "p1", "Ada")
     room = playing(room, question("a", 0), 0)
-    assert.throws(() => addPlayer(room, "p2", "Bea"), /already_started/)
+    room = applyTick(submitChoice(room, "p1", 0, 100), duration)
+    assert.equal(room.phase, "reveal")
+    room = addPlayer(room, "p2", "Bea")
+    assert.equal(room.players.find((p) => p.id === "p2")?.score, 0)
+    assert.equal(room.reveal?.results.some((r) => r.playerId === "p2"), false)
+    room = endGame(room)
+    room = addPlayer(room, "p3", "Cy")
+    assert.equal(room.players.find((p) => p.id === "p3")?.score, 0)
+  })
+
+  it("lets a player join mid-question and blocks the early reveal until they lock", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = playing(room, question("a", 0), 0)
+    room = submitChoice(room, "p1", 0, 100)
+    room = lockAnswer(room, "p1", 200)
+    room = addPlayer(room, "p2", "Bea")
+    assert.equal(room.players.find((p) => p.id === "p2")?.score, 0)
+    assert.equal(applyTick(room, 300).phase, "question")
+    room = submitChoice(room, "p2", 1, 400)
+    room = lockAnswer(room, "p2", 500)
+    const done = applyTick(room, 500)
+    assert.equal(done.phase, "reveal")
+    assert.equal(done.reveal?.results.find((r) => r.playerId === "p2")?.points, 0)
+  })
+
+  it("refuses the twenty-first player but still accepts a rejoin", () => {
+    let room = roomWith()
+    for (let i = 0; i < 20; i++) room = addPlayer(room, `p${i}`, `Player ${i}`)
+    assert.throws(() => addPlayer(room, "x", "Extra"), /room_full/)
+    room = setPlayerConnected(room, "p3", false)
+    const back = joinPlayer(room, { id: "x", name: "player 3", token: "new" })
+    assert.equal(back.player.id, "p3")
+  })
+
+  it("strips invisible characters from names", () => {
+    assert.equal(normalizeName("A\u200bd\u202ea\ufeff"), "Ada")
+    assert.equal(normalizeName("  Ada   Lovelace "), "Ada Lovelace")
+    assert.throws(() => normalizeName("\u200b\u200b\ufeff"), /name_empty/)
+    assert.throws(() => normalizeName("x".repeat(17)), /name_too_long/)
+    assert.equal(normalizeName("😀".repeat(16)), "😀".repeat(16))
+    assert.throws(() => normalizeName("😀".repeat(17)), /name_too_long/)
+  })
+
+  it("treats Polish capitals as the same name", () => {
+    const room = addPlayer(roomWith(), "p1", "Łukasz")
+    assert.throws(() => addPlayer(room, "p2", "ŁUKASZ"), /name_taken/)
+  })
+})
+
+describe("leaving and removal", () => {
+  it("removes a leaving player in the lobby", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = leavePlayer(room, "p1")
+    assert.equal(room.players.length, 0)
+    assert.equal(removePlayer(room, "nobody"), room)
+  })
+
+  it("keeps a leaving player's score once finished and refuses token reattach", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = playing(room, question("a", 0), 0)
+    room = applyTick(lockAnswer(submitChoice(room, "p1", 0, 0), "p1", 0), 0)
+    assert.ok((room.players[0]?.score ?? 0) > 0)
+    room = endGame(room)
+    room = leavePlayer(room, "p1")
+    assert.equal(room.players.length, 1)
+    assert.equal(room.players[0]?.connected, false)
+    assert.equal(room.players[0]?.token, "")
+    assert.ok((room.players[0]?.score ?? 0) > 0)
+    assert.throws(() => reconnectPlayer(room, "p1", ""), /rejoin/)
+    const back = joinPlayer(room, { id: "n", name: "Ada", token: "fresh" })
+    assert.equal(back.player.id, "p1")
+    assert.equal(back.player.token, "fresh")
+  })
+
+  it("reveals early after removing the only unlocked player", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = addPlayer(room, "p2", "Bea")
+    room = playing(room, question("a", 0), 0)
+    room = lockAnswer(submitChoice(room, "p1", 0, 100), "p1", 200)
+    room = submitChoice(room, "p2", 1, 300)
+    assert.equal(applyTick(room, 400).phase, "question")
+    room = removePlayer(room, "p2")
+    assert.equal(room.answers.p2, undefined)
+    const after = applyTick(room, 400)
+    assert.equal(after.phase, "reveal")
+    assert.equal(after.reveal?.results.length, 1)
+  })
+
+  it("sends a removed player's socket a guest view", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = removePlayer(room, "p1")
+    const snap = snapshotFor(room, { role: "player", playerId: "p1" }, 0, [])
+    assert.equal(snap.you.role, "guest")
+  })
+
+  it("drops the reveal from the snapshot when the game ends mid-question", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = playing(room, question("a", 0), 0)
+    room = endGame(room)
+    assert.equal(room.reveal, null)
+    assert.equal(snapshotFor(room, { role: "host" }, 10, []).reveal, null)
+    let done = playing(addPlayer(roomWith(), "p1", "Ada"), question("a", 0), 0)
+    done = endGame(applyTick(done, duration))
+    assert.equal(snapshotFor(done, { role: "host" }, duration, []).reveal, null)
+  })
+})
+
+describe("frozen duration and unlocked scoring", () => {
+  it("keeps the open question's time when the answer time changes; applies it from the next question", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = playing(room, question("a", 0), 0)
+    room = updateSettings(room, settings({ questionDurationMs: 5_000 }), 6_000)
+    assert.equal(room.activeDurationMs, duration)
+    assert.equal(applyTick(room, 6_000).phase, "question")
+    assert.equal(alarmAt(room), duration)
+    assert.equal(snapshotFor(room, { role: "host" }, 6_000, []).question?.durationMs, duration)
+    assert.equal(snapshotFor(room, { role: "host" }, 6_000, []).question?.remainingMs, duration - 6_000)
+    assert.equal(applyTick(room, duration).phase, "reveal")
+    const next = openedNext(applyTick(room, duration), question("b", 1), 30_000)
+    assert.equal(next.activeDurationMs, 5_000)
+    assert.equal(alarmAt(next), 35_000)
+  })
+
+  it("scores an unlocked correct pick the same on early reveal and on timeout", () => {
+    const build = () => {
+      let room = addPlayer(roomWith(), "p1", "Ada")
+      room = addPlayer(room, "p2", "Bea")
+      room = playing(room, question("a", 0), 0)
+      room = submitChoice(room, "p1", 0, 100)
+      room = lockAnswer(submitChoice(room, "p2", 1, 100), "p2", 200)
+      return room
+    }
+    const early = applyTick(setPlayerConnected(build(), "p1", false), 5_000)
+    const timeout = applyTick(build(), duration)
+    for (const room of [early, timeout]) {
+      assert.equal(room.phase, "reveal")
+      const ada = room.reveal?.results.find((r) => r.playerId === "p1")
+      assert.equal(ada?.points, BASE_POINTS)
+      assert.equal(ada?.elapsedMs, duration)
+    }
+  })
+})
+
+describe("ranks and counts", () => {
+  it("ranks with ties and reports previousRank after a reveal", () => {
+    let room = roomWith()
+    for (const [id, name, score] of [["a", "Ada", 100], ["b", "Bea", 100], ["c", "Cy", 50]] as const) {
+      room = { ...addPlayer(room, id, name), phase: "lobby" }
+      room = { ...room, players: room.players.map((p) => (p.id === id ? { ...p, score } : p)) }
+    }
+    const ranks = snapshotFor(room, { role: "host" }, 0, []).players.map((p) => [p.rank, p.previousRank])
+    assert.deepEqual(ranks, [[1, null], [1, null], [3, null]])
+    assert.deepEqual(
+      [...competitionRanks(new Map([["a", 100], ["b", 100], ["c", 50]])).values()],
+      [1, 1, 3],
+    )
+
+    let game = playing(room, question("q", 0), 0)
+    game = lockAnswer(submitChoice(game, "c", 0, 0), "c", 0)
+    game = applyTick(lockAnswer(submitChoice(game, "a", 1, 0), "a", 0), duration)
+    game = { ...game }
+    const snap = snapshotFor(game, { role: "host" }, duration, [])
+    const byId = Object.fromEntries(snap.players.map((p) => [p.id, p]))
+    assert.equal(byId.c?.score, 50 + 1000)
+    assert.equal(byId.c?.rank, 1)
+    assert.equal(byId.c?.previousRank, 3)
+    assert.equal(byId.a?.rank, 2)
+    assert.equal(byId.a?.previousRank, 1)
+    assert.equal(byId.b?.previousRank, 1)
+    const late = addPlayer(game, "d", "Dee")
+    assert.equal(snapshotFor(late, { role: "host" }, duration, []).players.find((p) => p.id === "d")?.previousRank, null)
+    const finished = endGame(game)
+    assert.ok(snapshotFor(finished, { role: "host" }, duration, []).players.every((p) => p.previousRank === null))
+  })
+
+  it("counts every pick per choice, locked or not", () => {
+    let room = roomWith()
+    for (const id of ["a", "b", "c", "d"]) room = addPlayer(room, id, id)
+    room = playing(room, question("q", 0), 0)
+    room = lockAnswer(submitChoice(room, "a", 0, 10), "a", 20)
+    room = submitChoice(room, "b", 0, 10)
+    room = submitChoice(room, "c", 3, 10)
+    room = applyTick(room, duration)
+    assert.deepEqual(room.reveal?.counts, [2, 0, 0, 1])
+  })
+})
+
+describe("category and stall", () => {
+  it("shows the category label in the ready and question views", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = startGame(room, { ...question("a", 0), categoryLabel: "Geografia" }, 0)
+    assert.equal(snapshotFor(room, { role: "host" }, 0, []).ready?.category, "Geografia")
+    room = applyTick(room, READY_DURATION_MS)
+    assert.equal(snapshotFor(room, { role: "host" }, READY_DURATION_MS, []).question?.category, "Geografia")
+  })
+
+  it("moves advanceAt when a deal stalls and reports it to the host only", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = applyTick(playing(room, question("a", 0), 0), duration)
+    const stalled = stallAdvance(room, 50_000)
+    assert.equal(stalled.stalled, true)
+    assert.equal(stalled.advanceAt, 50_000 + DEAL_RETRY_MS)
+    assert.equal(snapshotFor(stalled, { role: "host" }, 50_000, []).stalled, true)
+    assert.equal(snapshotFor(stalled, { role: "player", playerId: "p1" }, 50_000, []).stalled, false)
+    assert.equal(clearStall(stalled).stalled, false)
+    const manual = stallAdvance({ ...room, autoAdvance: false }, 50_000)
+    assert.equal(manual.stalled, true)
+    assert.equal(manual.advanceAt, room.advanceAt)
+  })
+
+  it("expires two days after the last activity, never when unknown", () => {
+    const room = roomWith()
+    assert.equal(expiresAt(room), null)
+    assert.equal(expiresAt({ ...room, lastActivityAt: 1_000 }), 1_000 + ROOM_TTL_MS)
+  })
+})
+
+describe("restoring a stored room", () => {
+  it("fills the new fields for a row stored before they existed", () => {
+    const oldQuestion = {
+      id: "a",
+      prompt: "Prompt a",
+      choices: ["Red", "Blue", "Gold", "Green"],
+      correctIndex: 0,
+      category: "general",
+      difficulty: 1,
+    }
+    const stored = {
+      code: "QUIZ",
+      hostToken: "host",
+      players: [{ id: "p1", name: "Ada", score: 800, connected: true, token: "t" }],
+      asked: [oldQuestion],
+      questionIndex: 0,
+      phase: "reveal",
+      questionDurationMs: 30_000,
+      revealDurationMs: 8_000,
+      answers: {},
+      reveal: {
+        correctIndex: 0,
+        prompt: "Prompt a",
+        choices: oldQuestion.choices,
+        results: [
+          { playerId: "p1", name: "Ada", choiceIndex: 0, correct: true, points: 800, score: 800, elapsedMs: 1, locked: true },
+          { playerId: "p2", name: "Bea", choiceIndex: 3, correct: false, points: 0, score: 0, elapsedMs: 1, locked: false },
+          { playerId: "p3", name: "Cy", choiceIndex: null, correct: false, points: 0, score: 0, elapsedMs: 1, locked: false },
+        ],
+      },
+    }
+    const room = restoreRoom(stored)
+    assert.equal(room.activeDurationMs, 30_000)
+    assert.equal(room.lastActivityAt, 0)
+    assert.equal(room.stalled, false)
+    assert.equal(expiresAt(room), null)
+    assert.equal(room.asked[0]?.categoryLabel, "")
+    assert.deepEqual(room.reveal?.counts, [1, 0, 0, 1])
+    const snap = snapshotFor(room, { role: "host" }, 0, [])
+    assert.equal(snap.reveal?.counts[3], 1)
+    assert.equal(snap.players[0]?.rank, 1)
+    assert.equal(snap.players[0]?.previousRank, 1)
+    assert.equal(restoreRoom({ ...stored, activeDurationMs: 1 }).activeDurationMs, 30_000)
+    assert.equal(restoreRoom({ ...stored, activeDurationMs: 7_000 }).activeDurationMs, 7_000)
+    assert.equal(restoreRoom({ ...stored, stalled: true, lastActivityAt: 5 }).stalled, true)
+    assert.equal(restoreRoom({ ...stored, lastActivityAt: "x" }).lastActivityAt, 0)
+    const counted = restoreRoom({ ...stored, reveal: { ...stored.reveal, counts: [9, 8, 7, 6] } })
+    assert.deepEqual(counted.reveal?.counts, [9, 8, 7, 6])
+    const label = restoreRoom({ ...stored, asked: [{ ...oldQuestion, categoryLabel: "Geografia" }] })
+    assert.equal(label.asked[0]?.categoryLabel, "Geografia")
+  })
+
+  it("keeps a stored token-less player and refuses their old token", () => {
+    const room = restoreRoom({
+      code: "QUIZ",
+      hostToken: "host",
+      players: [{ id: "p1", name: "Ada", score: 5, connected: false, token: "" }],
+      phase: "finished",
+    })
+    assert.throws(() => reconnectPlayer(room, "p1", ""), /rejoin/)
   })
 })
 
@@ -261,14 +555,6 @@ describe("host settings", () => {
     assert.equal(room.questionDurationMs, 10_000)
     assert.equal(room.difficulty, "2-4")
     assert.deepEqual(difficultyBounds(room.difficulty), { minDifficulty: 2, maxDifficulty: 4 })
-  })
-
-  it("reveals when a shorter answer time is already past", () => {
-    let room = addPlayer(roomWith(), "p1", "Ada")
-    room = playing(room, question("a", 0), 0)
-    room = updateSettings(room, settings({ questionDurationMs: 5_000 }), 6_000)
-    room = applyTick(room, 6_000)
-    assert.equal(room.phase, "reveal")
   })
 
   it("counts down to the next question only when automatic advance is on", () => {

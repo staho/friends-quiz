@@ -6,6 +6,19 @@ import { describe, it } from "node:test"
 import { fileURLToPath } from "node:url"
 import { QUESTIONS_PER_ROUND } from "../shared/types.ts"
 import {
+  applyTick,
+  createRoom,
+  difficultyBounds,
+  difficultyForSlot,
+  joinPlayer,
+  nextQuestion,
+  resetRound,
+  startGame,
+  takeFromDeck,
+  type Question,
+  type Room,
+} from "../server/game.ts"
+import {
   applyCatalogMigrations,
   listCategories,
   listQuestionStats,
@@ -263,6 +276,7 @@ describe("question catalog", () => {
             id: "bad",
             prompt: "Huh?",
             category: "general",
+            category_label: null,
             difficulty: 1,
             position: 0,
             text: "Only",
@@ -271,5 +285,108 @@ describe("question catalog", () => {
         ]),
       (error: unknown) => error instanceof Error && /four answers/.test(error.message),
     )
+  })
+})
+
+describe("catalog queries inside a long-running room", () => {
+  function openCounted(): { db: StatementDatabase; raw: DatabaseSync; binds: number[] } {
+    const raw = openMemory()
+    applyCatalogMigrations(asMigrationDatabase(raw), migrationFiles())
+    const inner = asStatementDatabase(raw)
+    const binds: number[] = []
+    const db: StatementDatabase = {
+      prepare(query: string) {
+        const wrap = (statement: ReturnType<StatementDatabase["prepare"]>): ReturnType<StatementDatabase["prepare"]> => ({
+          bind(...values: unknown[]) {
+            if (values.length > 100) throw new Error("too many SQL variables")
+            binds.push(values.length)
+            return wrap(statement.bind(...values))
+          },
+          all: (...args) => statement.all(...args),
+          run: () => statement.run(),
+        })
+        return wrap(inner.prepare(query))
+      },
+    }
+    return { db, raw, binds }
+  }
+
+  async function dealRound(db: StatementDatabase, start: Room, now: number): Promise<Room> {
+    const pick = (excludeIds: string[], difficulty: number, bounds?: { minDifficulty: number; maxDifficulty: number }, counts?: Record<string, number>) =>
+      pickRandomQuestion(db, excludeIds, difficulty, bounds, counts)
+    const deal = async (room: Room): Promise<{ room: Room; question: Question | null }> =>
+      takeFromDeck(room, difficultyForSlot(room.asked.length), difficultyBounds(room.difficulty), pick)
+    const first = await deal(start)
+    assert.ok(first.question)
+    let room = startGame(first.room, first.question, now)
+    let t = now
+    for (let slot = 0; slot < QUESTIONS_PER_ROUND; slot += 1) {
+      t += 3_000
+      room = applyTick(room, t)
+      assert.equal(room.phase, "question")
+      t += room.activeDurationMs
+      room = applyTick(room, t)
+      assert.equal(room.phase, "reveal")
+      if (slot === QUESTIONS_PER_ROUND - 1) break
+      const dealt = await deal(room)
+      assert.ok(dealt.question)
+      room = nextQuestion(dealt.room, dealt.question, t)
+    }
+    return room
+  }
+
+  it("never binds more than three parameters across 14 rounds in one room", async () => {
+    const { db, binds } = openCounted()
+    let room = joinPlayer(createRoom({ code: "QUIZ", hostToken: "h" }), { id: "p1", name: "Ada", token: "t" }).room
+    let now = 0
+    for (let round = 0; round < 14; round += 1) {
+      room = await dealRound(db, room, now)
+      const ids = room.asked.map((item) => item.id)
+      assert.equal(ids.length, QUESTIONS_PER_ROUND)
+      assert.equal(new Set(ids).size, QUESTIONS_PER_ROUND)
+      room = resetRound({ ...room, phase: "reveal" })
+      now += 10 * 60_000
+    }
+    assert.ok(binds.length > 0)
+    assert.ok(Math.max(...binds) <= 3, `max binds ${Math.max(...binds)}`)
+  })
+
+  it("spreads one round evenly over the categories", async () => {
+    const { db, raw } = openCounted()
+    const categories = countRows(raw, "categories")
+    assert.ok(categories > 1)
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const room = await dealRound(
+        db,
+        joinPlayer(createRoom({ code: "QUIZ", hostToken: "h" }), { id: "p1", name: "Ada", token: "t" }).room,
+        0,
+      )
+      const counts = new Map<string, number>()
+      for (const item of room.asked) counts.set(item.category, (counts.get(item.category) ?? 0) + 1)
+      assert.ok(
+        Math.max(...counts.values()) <= Math.ceil(QUESTIONS_PER_ROUND / categories),
+        JSON.stringify([...counts]),
+      )
+    }
+  })
+
+  it("still deals from a category that is already over-used", async () => {
+    const { db } = openCounted()
+    const picked = await pickRandomQuestion(db, [], 1, undefined, { geography: 50 })
+    assert.ok(picked)
+  })
+
+  it("takes the label from the categories table", async () => {
+    const { db, raw } = openCounted()
+    raw.prepare("UPDATE categories SET label = 'Etykieta testowa' WHERE id = (SELECT category FROM questions WHERE id = 'paris')").run()
+    const [paris] = await listQuestions(db, { ids: ["paris"] })
+    assert.equal(paris?.categoryLabel, "Etykieta testowa")
+    const rows = [
+      { id: "x", prompt: "P", category: "c", category_label: null, difficulty: 1, position: 0, text: "a", is_correct: 1 },
+      { id: "x", prompt: "P", category: "c", category_label: null, difficulty: 1, position: 1, text: "b", is_correct: 0 },
+      { id: "x", prompt: "P", category: "c", category_label: null, difficulty: 1, position: 2, text: "c", is_correct: 0 },
+      { id: "x", prompt: "P", category: "c", category_label: null, difficulty: 1, position: 3, text: "d", is_correct: 0 },
+    ]
+    assert.equal(questionsFromRows(rows)[0]?.categoryLabel, "c")
   })
 })

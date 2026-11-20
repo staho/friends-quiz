@@ -236,6 +236,7 @@ function clientMessage(event: string, payload: unknown): ClientMessage {
     case "host:end":
     case "host:reset":
     case "player:lock":
+    case "player:leave":
       return { id, event }
     case "host:attach": {
       if (!isCodeToken(payload)) throw new QuizError("room_not_found")
@@ -252,6 +253,10 @@ function clientMessage(event: string, payload: unknown): ClientMessage {
     case "player:choose": {
       if (!isRecord(payload) || typeof payload.choiceIndex !== "number") throw new QuizError("bad_request")
       return { id, event, payload: { choiceIndex: payload.choiceIndex } }
+    }
+    case "host:remove": {
+      if (!isPlayerId(payload)) throw new QuizError("bad_request")
+      return { id, event, payload: { playerId: payload.playerId } }
     }
     case "host:settings": {
       if (!isSettings(payload)) throw new QuizError("bad_request")
@@ -277,6 +282,10 @@ function isPlayerAttach(value: unknown): value is { code: string; playerId: stri
     typeof value.playerId === "string" &&
     typeof value.token === "string"
   )
+}
+
+function isPlayerId(value: unknown): value is { playerId: string } {
+  return isRecord(value) && typeof value.playerId === "string" && value.playerId !== ""
 }
 
 function isSettings(value: unknown): value is RoomSettings {

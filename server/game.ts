@@ -3,6 +3,8 @@ import {
   ANSWER_TIME_MAX_MS,
   ANSWER_TIME_MIN_MS,
   BASE_POINTS,
+  DEAL_RETRY_MS,
+  MAX_PLAYERS,
   MAX_SPEED_BONUS,
   NEXT_TIME_DEFAULT_MS,
   NEXT_TIME_MAX_MS,
@@ -10,8 +12,10 @@ import {
   QUESTION_DURATION_MS,
   QUESTIONS_PER_ROUND,
   READY_DURATION_MS,
+  ROOM_TTL_MS,
   type ChoiceIndex,
   type DifficultyBand,
+  type GuestView,
   type HostView,
   type Phase,
   type PlayerView,
@@ -35,6 +39,7 @@ export interface Question {
   choices: [string, string, string, string]
   correctIndex: ChoiceIndex
   category: string
+  categoryLabel?: string
   difficulty: number
 }
 
@@ -98,6 +103,7 @@ export interface Room {
   questionStartedAt: number | null
   readyUntil: number | null
   questionDurationMs: number
+  activeDurationMs: number
   revealDurationMs: number
   autoAdvance: boolean
   difficulty: DifficultyBand
@@ -108,6 +114,8 @@ export interface Room {
   reveal: PublicReveal | null
   roundId: string | null
   pendingPlays: PendingPlay[]
+  lastActivityAt: number
+  stalled: boolean
 }
 
 export interface Viewer {
@@ -145,6 +153,22 @@ export function releaseDifficulty(room: Room, difficulty: number): Room {
   return { ...room, seen: [...kept, ...stillOut] }
 }
 
+export function roundCategoryCounts(room: Room): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const question of room.asked) counts[question.category] = (counts[question.category] ?? 0) + 1
+  return counts
+}
+
+export function shuffleChoices(q: Question, rng: () => number = Math.random): Question {
+  const order = shuffle([0, 1, 2, 3], rng)
+  const [a, b, c, d] = order.map((index) => q.choices[index])
+  const correctIndex = order.indexOf(q.correctIndex)
+  if (a === undefined || b === undefined || c === undefined || d === undefined || !isChoiceIndex(correctIndex)) {
+    return q
+  }
+  return { ...q, choices: [a, b, c, d], correctIndex }
+}
+
 export async function takeFromDeck(
   room: Room,
   target: number,
@@ -153,14 +177,17 @@ export async function takeFromDeck(
     excludeIds: string[],
     difficulty: number,
     bounds?: { minDifficulty: number; maxDifficulty: number },
+    categoryCounts?: Record<string, number>,
   ) => Promise<Question | null>,
+  rng: () => number = Math.random,
 ): Promise<{ room: Room; question: Question | null }> {
   const exact = { minDifficulty: target, maxDifficulty: target }
-  const first = await pick(dealExcludeIds(room), target, exact)
-  if (first) return { room, question: first }
+  const counts = roundCategoryCounts(room)
+  const first = await pick(dealExcludeIds(room), target, exact, counts)
+  if (first) return { room, question: shuffleChoices(first, rng) }
   const deck = releaseDifficulty(room, target)
-  const second = await pick(dealExcludeIds(deck), target, bounds ?? undefined)
-  return { room: deck, question: second }
+  const second = await pick(dealExcludeIds(deck), target, bounds ?? undefined, counts)
+  return { room: deck, question: second ? shuffleChoices(second, rng) : null }
 }
 
 export function shuffle<T>(items: readonly T[], rng: () => number = Math.random): T[] {
@@ -214,6 +241,7 @@ export function createRoom(options: {
     questionStartedAt: null,
     readyUntil: null,
     questionDurationMs: options.questionDurationMs ?? QUESTION_DURATION_MS,
+    activeDurationMs: options.questionDurationMs ?? QUESTION_DURATION_MS,
     revealDurationMs: NEXT_TIME_DEFAULT_MS,
     autoAdvance: true,
     difficulty: "mixed",
@@ -224,6 +252,8 @@ export function createRoom(options: {
     reveal: null,
     roundId: null,
     pendingPlays: [],
+    lastActivityAt: 0,
+    stalled: false,
   }
 }
 
@@ -233,6 +263,7 @@ export function restoreRoom(raw: unknown): Room {
   const value = readStoredRoom(raw)
   const phase = readPhase(value.phase)
   const legacy = readLegacyQuestions(value)
+  const questionDurationMs = value.questionDurationMs ?? QUESTION_DURATION_MS
   return {
     code: value.code,
     hostToken: value.hostToken,
@@ -245,16 +276,50 @@ export function restoreRoom(raw: unknown): Room {
     phase,
     questionStartedAt: value.questionStartedAt ?? null,
     readyUntil: readReadyUntil(phase, value.readyUntil),
-    questionDurationMs: value.questionDurationMs ?? QUESTION_DURATION_MS,
+    questionDurationMs,
+    activeDurationMs: readActiveDuration(value.activeDurationMs, questionDurationMs),
     revealDurationMs: readRevealDuration(value.revealDurationMs),
     autoAdvance: value.autoAdvance !== false,
     difficulty: readDifficultyBand(value.difficulty),
     ...readAdvance(value),
     answers: value.answers ?? {},
-    reveal: value.reveal ?? null,
+    reveal: readReveal(value.reveal),
     roundId: readRoundId(value.roundId),
     pendingPlays: readPendingPlays(value.pendingPlays),
+    lastActivityAt:
+      typeof value.lastActivityAt === "number" && Number.isFinite(value.lastActivityAt) ? value.lastActivityAt : 0,
+    stalled: value.stalled === true,
   }
+}
+
+function readActiveDuration(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isInteger(value) && value >= ANSWER_TIME_MIN_MS && value <= ANSWER_TIME_MAX_MS) {
+    return value
+  }
+  return fallback
+}
+
+function readReveal(value: unknown): PublicReveal | null {
+  if (!value || typeof value !== "object") return null
+  const reveal = value as PublicReveal
+  if (isCounts(reveal.counts)) return reveal
+  return { ...reveal, counts: countChoices(Array.isArray(reveal.results) ? reveal.results : []) }
+}
+
+function isCounts(value: unknown): value is PublicReveal["counts"] {
+  return (
+    Array.isArray(value) &&
+    value.length === 4 &&
+    value.every((item) => typeof item === "number" && Number.isInteger(item) && item >= 0)
+  )
+}
+
+function countChoices(results: readonly RevealResult[]): PublicReveal["counts"] {
+  const counts: PublicReveal["counts"] = [0, 0, 0, 0]
+  for (const result of results) {
+    if (result.choiceIndex != null && isChoiceIndex(result.choiceIndex)) counts[result.choiceIndex] += 1
+  }
+  return counts
 }
 
 function readStoredRoom(raw: unknown): StoredRoom & { code: string; hostToken: string } {
@@ -334,9 +399,13 @@ function readAdvanceAt(autoAdvance: boolean, value: number | null | undefined): 
 }
 
 function readAsked(value: StoredRoom, phase: Room["phase"], legacy: Question[] | null): Question[] {
-  if (Array.isArray(value.asked)) return value.asked
+  if (Array.isArray(value.asked)) return value.asked.map(withCategoryLabel)
   if (!legacy || phase === "lobby") return []
-  return legacy.slice(0, (value.questionIndex ?? 0) + 1)
+  return legacy.slice(0, (value.questionIndex ?? 0) + 1).map(withCategoryLabel)
+}
+
+function withCategoryLabel(q: Question): Question {
+  return { ...q, categoryLabel: typeof q.categoryLabel === "string" ? q.categoryLabel : "" }
 }
 
 function readSeen(value: unknown): SeenQuestion[] {
@@ -364,18 +433,22 @@ function rememberQuestion(seen: SeenQuestion[], question: Question): SeenQuestio
   return [...seen, { id: question.id, difficulty: question.difficulty }]
 }
 
+function sameName(a: string, b: string): boolean {
+  return a.toLocaleLowerCase("pl") === b.toLocaleLowerCase("pl")
+}
+
 export function joinPlayer(
   room: Room,
   input: { id: string; name: string; token: string },
 ): { room: Room; player: Player } {
   const name = normalizeName(input.name)
-  const byToken = room.players.find((player) => player.token === input.token)
+  const byToken = input.token === "" ? undefined : room.players.find((player) => player.token === input.token)
   if (byToken) {
     const player = { ...byToken, connected: true }
     return { room: replacePlayer(room, player), player }
   }
 
-  const byName = room.players.find((player) => player.name.toLowerCase() === name.toLowerCase())
+  const byName = room.players.find((player) => sameName(player.name, name))
   if (byName) {
     if (!byName.connected) {
       const player = { ...byName, connected: true, token: input.token }
@@ -384,7 +457,7 @@ export function joinPlayer(
     throw new GameError("name_taken")
   }
 
-  if (room.phase !== "lobby") throw new GameError("already_started")
+  if (room.players.length >= MAX_PLAYERS) throw new GameError("room_full")
 
   const player: Player = {
     id: input.id,
@@ -396,9 +469,22 @@ export function joinPlayer(
   return { room: { ...room, players: [...room.players, player] }, player }
 }
 
+export function removePlayer(room: Room, playerId: string): Room {
+  if (!room.players.some((player) => player.id === playerId)) return room
+  const { [playerId]: _removed, ...answers } = room.answers
+  return { ...room, players: room.players.filter((player) => player.id !== playerId), answers }
+}
+
+export function leavePlayer(room: Room, playerId: string): Room {
+  if (room.phase !== "finished") return removePlayer(room, playerId)
+  const player = room.players.find((item) => item.id === playerId)
+  if (!player) return room
+  return replacePlayer(room, { ...player, connected: false, token: "" })
+}
+
 export function reconnectPlayer(room: Room, playerId: string, token: string): Room {
   const player = room.players.find((item) => item.id === playerId)
-  if (!player || player.token !== token) throw new GameError("rejoin")
+  if (!player || player.token === "" || player.token !== token) throw new GameError("rejoin")
   return replacePlayer(room, { ...player, connected: true })
 }
 
@@ -528,7 +614,7 @@ export function advanceDue(room: Room, now: number): boolean {
 export function alarmAt(room: Room): number | null {
   if (room.phase === "ready" && room.readyUntil != null) return room.readyUntil
   if (room.phase === "question" && room.questionStartedAt != null) {
-    return room.questionStartedAt + room.questionDurationMs
+    return room.questionStartedAt + room.activeDurationMs
   }
   if (room.phase === "reveal" && room.autoAdvance && room.advanceAt != null) return room.advanceAt
   return null
@@ -547,7 +633,7 @@ export function applyTick(room: Room, now: number): Room {
     return openQuestion(room, now)
   }
   if (room.phase !== "question" || room.questionStartedAt == null) return room
-  const deadline = room.questionStartedAt + room.questionDurationMs
+  const deadline = room.questionStartedAt + room.activeDurationMs
   const connected = room.players.filter((player) => player.connected)
   const allLocked =
     connected.length > 0 && connected.every((player) => room.answers[player.id]?.locked === true)
@@ -560,22 +646,14 @@ export function reveal(room: Room, now: number): Room {
     throw new GameError("no_question_open")
   }
   const question = currentQuestion(room)
-  const elapsedNow = Math.min(
-    room.questionDurationMs,
-    Math.max(0, now - room.questionStartedAt),
-  )
   const history: AnswerRecord[] = []
   const results: RevealResult[] = room.players.map((player) => {
     const answer = room.answers[player.id]
     const choiceIndex = answer?.choiceIndex ?? null
     const correct = choiceIndex === question.correctIndex
     const elapsedMs =
-      answer == null
-        ? room.questionDurationMs
-        : answer.locked && answer.elapsedMs != null
-          ? answer.elapsedMs
-          : elapsedNow
-    const points = answer ? scoreAnswer(correct, elapsedMs, room.questionDurationMs) : 0
+      answer?.locked === true && answer.elapsedMs != null ? answer.elapsedMs : room.activeDurationMs
+    const points = answer ? scoreAnswer(correct, elapsedMs, room.activeDurationMs) : 0
     history.push({
       playerId: player.id,
       questionId: question.id,
@@ -614,6 +692,7 @@ export function reveal(room: Room, now: number): Room {
         prompt: question.prompt,
         choices: question.choices,
         results,
+        counts: countChoices(results),
       },
     },
     question,
@@ -655,7 +734,33 @@ export function endGame(room: Room): Room {
     readyUntil: null,
     ...stoppedAdvance(),
     answers: {},
+    reveal: null,
   }
+}
+
+export function stallAdvance(room: Room, now: number): Room {
+  if (room.phase === "reveal" && room.autoAdvance && !room.advancePaused) {
+    return { ...room, stalled: true, advanceAt: now + DEAL_RETRY_MS }
+  }
+  return { ...room, stalled: true }
+}
+
+export function clearStall(room: Room): Room {
+  return { ...room, stalled: false }
+}
+
+export function expiresAt(room: Room): number | null {
+  return room.lastActivityAt > 0 ? room.lastActivityAt + ROOM_TTL_MS : null
+}
+
+export function competitionRanks(scores: Map<string, number>): Map<string, number> {
+  const ranks = new Map<string, number>()
+  for (const [id, score] of scores) {
+    let better = 0
+    for (const other of scores.values()) if (other > score) better += 1
+    ranks.set(id, better + 1)
+  }
+  return ranks
 }
 
 export function resetRound(room: Room): Room {
@@ -677,11 +782,13 @@ export function resetRound(room: Room): Room {
 
 export function snapshotFor(room: Room, viewer: Viewer, now: number, lanAddresses: string[]): RoomSnapshot {
   const question = room.phase === "question" ? currentQuestion(room) : null
-  const you: PlayerView | HostView =
+  const you: PlayerView | HostView | GuestView =
     viewer.role === "player" && viewer.playerId
       ? playerView(room, viewer.playerId)
       : { role: "host" }
 
+  const ranks = competitionRanks(new Map(room.players.map((player) => [player.id, player.score])))
+  const previousRanks = previousRankMap(room)
   return {
     code: room.code,
     phase: room.phase,
@@ -692,6 +799,8 @@ export function snapshotFor(room: Room, viewer: Viewer, now: number, lanAddresse
       connected: player.connected,
       picked: room.answers[player.id] != null,
       locked: room.answers[player.id]?.locked === true,
+      rank: ranks.get(player.id) ?? 1,
+      previousRank: previousRanks.get(player.id) ?? null,
     })),
     question: question
       ? {
@@ -699,25 +808,36 @@ export function snapshotFor(room: Room, viewer: Viewer, now: number, lanAddresse
           choices: question.choices,
           index: room.questionIndex,
           total: room.questionLimit,
-          durationMs: room.questionDurationMs,
+          durationMs: room.activeDurationMs,
           remainingMs: remainingMs(room, now),
           difficulty: question.difficulty,
+          category: question.categoryLabel ?? "",
         }
       : null,
     ready: readyView(room, now),
-    reveal: room.phase === "reveal" || room.phase === "finished" ? room.reveal : null,
+    reveal: room.phase === "reveal" ? room.reveal : null,
     you,
     lanAddresses,
     settings: roomSettings(room),
     revealRemainingMs: revealWaitMs(room, now),
     advancePaused: room.phase === "reveal" && room.advancePaused,
+    stalled: viewer.role === "host" && room.stalled,
   }
 }
 
+function previousRankMap(room: Room): Map<string, number> {
+  if (room.phase !== "reveal" || !room.reveal) return new Map()
+  return competitionRanks(new Map(room.reveal.results.map((result) => [result.playerId, result.score - result.points])))
+}
+
 export function normalizeName(input: string): string {
-  const name = input.replace(/[\u0000-\u001f]/g, "").replace(/\s+/g, " ").trim()
+  const name = input
+    .normalize("NFC")
+    .replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
   if (!name) throw new GameError("name_empty")
-  if (name.length > MAX_NAME_LENGTH) throw new GameError("name_too_long")
+  if ([...name].length > MAX_NAME_LENGTH) throw new GameError("name_too_long")
   return name
 }
 
@@ -735,12 +855,14 @@ function openQuestion(room: Room, now: number): Room {
     phase: "question",
     questionStartedAt: now,
     readyUntil: null,
+    activeDurationMs: room.questionDurationMs,
   }
 }
 
 function readyView(room: Room, now: number): PublicReady | null {
   if (room.phase !== "ready" || room.readyUntil == null) return null
   return {
+    category: room.asked[room.questionIndex]?.categoryLabel ?? "",
     index: room.questionIndex,
     total: room.questionLimit,
     remainingMs: Math.max(0, room.readyUntil - now),
@@ -748,9 +870,9 @@ function readyView(room: Room, now: number): PublicReady | null {
   }
 }
 
-function playerView(room: Room, playerId: string): PlayerView {
+function playerView(room: Room, playerId: string): PlayerView | GuestView {
   const player = room.players.find((item) => item.id === playerId)
-  if (!player) throw new GameError("rejoin")
+  if (!player) return { role: "guest" }
   const answer = room.answers[playerId]
   return {
     role: "player",
@@ -844,19 +966,19 @@ function requireDifficultyBand(value: unknown): DifficultyBand {
 
 function remainingMs(room: Room, now: number): number {
   if (room.questionStartedAt == null) return 0
-  return Math.max(0, room.questionStartedAt + room.questionDurationMs - now)
+  return Math.max(0, room.questionStartedAt + room.activeDurationMs - now)
 }
 
 function elapsed(room: Room, now: number): number {
-  if (room.questionStartedAt == null) return room.questionDurationMs
-  return Math.min(room.questionDurationMs, Math.max(0, now - room.questionStartedAt))
+  if (room.questionStartedAt == null) return room.activeDurationMs
+  return Math.min(room.activeDurationMs, Math.max(0, now - room.questionStartedAt))
 }
 
 function assertQuestionOpen(room: Room, now: number): void {
   if (room.phase !== "question" || room.questionStartedAt == null) {
     throw new GameError("no_question_open")
   }
-  if (now >= room.questionStartedAt + room.questionDurationMs) {
+  if (now >= room.questionStartedAt + room.activeDurationMs) {
     throw new GameError("time_up")
   }
 }

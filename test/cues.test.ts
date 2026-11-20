@@ -26,6 +26,8 @@ function player(id: string, overrides: Partial<PublicPlayer> = {}): PublicPlayer
     connected: true,
     picked: false,
     locked: false,
+    rank: 1,
+    previousRank: null,
     ...overrides,
   }
 }
@@ -39,11 +41,12 @@ function question(index = 0): PublicQuestion {
     durationMs: 20_000,
     remainingMs: 20_000,
     difficulty: 1,
+    category: "",
   }
 }
 
 function ready(index = 0): PublicReady {
-  return { index, total: 10, remainingMs: 3_000, durationMs: 3_000 }
+  return { category: "", index, total: 10, remainingMs: 3_000, durationMs: 3_000 }
 }
 
 function reveal(results: RevealResult[], correctIndex: ChoiceIndex = 1): PublicReveal {
@@ -52,6 +55,7 @@ function reveal(results: RevealResult[], correctIndex: ChoiceIndex = 1): PublicR
     prompt: "Which one?",
     choices: ["Red", "Blue", "Gold", "Green"],
     results,
+    counts: [0, 0, 0, 0],
   }
 }
 
@@ -102,6 +106,7 @@ function room(overrides: Partial<RoomSnapshot> = {}): RoomSnapshot {
     },
     revealRemainingMs: null,
     advancePaused: false,
+    stalled: false,
     ...overrides,
   }
 }
