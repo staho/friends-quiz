@@ -1,0 +1,86 @@
+/* Phone-only rules. Imported after styles.css so equal-specificity rules here win. */
+
+.phone-head {
+  align-items: center;
+  gap: 12px;
+}
+
+.phone-head .timer {
+  flex: 1;
+  min-width: 0;
+  gap: 10px;
+}
+
+.phone-head .timer-track { height: 12px; }
+
+.phone-head .timer-seconds { display: none; }
+
+.phone-secs {
+  font-size: 1.05rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--ink, #1a120c);
+}
+
+.phone-secs.urgent { color: #e23b3b; }
+
+.phone-head > strong {
+  white-space: nowrap;
+  font-size: 1.05rem;
+  padding-left: 12px;
+  border-left: 2px solid var(--line);
+}
+
+.place-line {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+@media (max-width: 360px) {
+  .phone-wait { gap: 8px; }
+  .phone-wait h1 { font-size: 1.6rem; }
+  .phone-wait .answer-grid { margin-top: 0; gap: 6px; }
+  .phone-wait .answer {
+    min-height: 44px;
+    padding: 8px 10px;
+  }
+  .phone-wait .answer .letter {
+    width: 28px;
+    height: 28px;
+    font-size: 1rem;
+  }
+  .phone-wait .answer .label { font-size: 1rem; }
+  .phone-wait.reveal .hint { display: none; }
+  .place-line { font-size: 1rem; }
+}
+
+/* Question screen on short phones: four answers and the lock button must fit without scrolling. */
+@media (max-height: 700px) {
+  .stage.phone { padding-top: 8px; }
+  .phone-tools { margin-bottom: 4px; }
+  .phone-tools .btn { padding: 6px 14px; font-size: 0.9rem; }
+  .phone-play { gap: 8px; }
+  .answer-grid.phone { gap: 8px; overflow: visible; }
+  .answer-grid.phone .answer {
+    min-height: 72px;
+    padding: 6px 14px;
+    gap: 12px;
+    border-radius: 14px;
+  }
+  .answer-grid.phone .answer .letter { width: 32px; height: 32px; font-size: 1rem; }
+  .answer-grid.phone .answer .label { font-size: 1.05rem; line-height: 1.15; }
+  .lockbar { gap: 4px; padding-top: 4px; }
+  .lockbar .btn { padding: 12px 16px; min-height: 48px; }
+}
+
+/* Landscape phones: 2x2 answers, no hint. */
+@media (max-height: 420px) and (orientation: landscape) {
+  .stage.phone { padding-top: 6px; padding-bottom: 6px; }
+  .phone-tools { margin-bottom: 2px; }
+  .phone-play { gap: 6px; }
+  .stage.phone .answer-grid.phone { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .answer-grid.phone .answer { min-height: 64px; padding: 4px 12px; }
+  .lockbar .hint { display: none; }
+}
