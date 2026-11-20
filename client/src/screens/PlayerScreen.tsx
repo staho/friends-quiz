@@ -4,6 +4,7 @@ import type { PlayerSession, RevealResult, RoomSnapshot } from "@shared/types"
 import { AnswerGrid, formatCode, formatLockSeconds } from "../components"
 import { MuteButton } from "../MuteButton"
 import { request, socket } from "../socket"
+import { errorCode } from "../errors"
 import { useRoom } from "../useRoom"
 import { usePlayerSounds } from "../useSounds"
 
@@ -38,8 +39,8 @@ export function PlayerScreen() {
           sessionStorage.setItem(PLAYER_KEY, JSON.stringify(session))
         })
         .catch((err: unknown) => {
-          const message = err instanceof Error ? err.message : ""
-          if (message === "Room not found" || message === "Rejoin the room") {
+          const code = errorCode(err)
+          if (code === "room_not_found" || code === "rejoin") {
             sessionStorage.removeItem(PLAYER_KEY)
           }
         })

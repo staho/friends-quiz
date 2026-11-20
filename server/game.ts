@@ -1,3 +1,4 @@
+import type { ErrorCode } from "../shared/errors.ts"
 import {
   ANSWER_TIME_MAX_MS,
   ANSWER_TIME_MIN_MS,
@@ -22,8 +23,8 @@ import {
 } from "../shared/types.ts"
 
 export class GameError extends Error {
-  constructor(message: string) {
-    super(message)
+  constructor(readonly code: ErrorCode) {
+    super(code)
     this.name = "GameError"
   }
 }
@@ -178,9 +179,9 @@ export function shuffle<T>(items: readonly T[], rng: () => number = Math.random)
 export const randomQuestionPolicy: QuestionPolicy = (candidates, stats, rng = Math.random) => {
   const asked = new Set(stats.askedIds)
   const unseen = candidates.filter((question) => !asked.has(question.id))
-  if (unseen.length === 0) throw new GameError("No questions available")
+  if (unseen.length === 0) throw new GameError("no_questions")
   const picked = shuffle(unseen, rng)[0]
-  if (!picked) throw new GameError("No questions available")
+  if (!picked) throw new GameError("no_questions")
   return picked
 }
 
@@ -199,7 +200,7 @@ export function createRoom(options: {
   questionDurationMs?: number
 }): Room {
   const questionLimit = options.questionLimit ?? QUESTIONS_PER_ROUND
-  if (questionLimit < 1) throw new GameError("A round needs at least one question")
+  if (questionLimit < 1) throw new GameError("bad_request")
   return {
     code: options.code,
     hostToken: options.hostToken,
@@ -257,12 +258,12 @@ export function restoreRoom(raw: unknown): Room {
 }
 
 function readStoredRoom(raw: unknown): StoredRoom & { code: string; hostToken: string } {
-  if (!raw || typeof raw !== "object") throw new GameError("Room not found")
+  if (!raw || typeof raw !== "object") throw new GameError("room_not_found")
   const value = raw as StoredRoom
   const code = value.code
   const hostToken = value.hostToken
   if (typeof code !== "string" || typeof hostToken !== "string") {
-    throw new GameError("Room not found")
+    throw new GameError("room_not_found")
   }
   return { ...value, code, hostToken }
 }
@@ -380,10 +381,10 @@ export function joinPlayer(
       const player = { ...byName, connected: true, token: input.token }
       return { room: replacePlayer(room, player), player }
     }
-    throw new GameError("That name is taken")
+    throw new GameError("name_taken")
   }
 
-  if (room.phase !== "lobby") throw new GameError("This round has already started")
+  if (room.phase !== "lobby") throw new GameError("already_started")
 
   const player: Player = {
     id: input.id,
@@ -397,7 +398,7 @@ export function joinPlayer(
 
 export function reconnectPlayer(room: Room, playerId: string, token: string): Room {
   const player = room.players.find((item) => item.id === playerId)
-  if (!player || player.token !== token) throw new GameError("Rejoin the room")
+  if (!player || player.token !== token) throw new GameError("rejoin")
   return replacePlayer(room, { ...player, connected: true })
 }
 
@@ -418,8 +419,8 @@ export function withLiveConnections(room: Room, livePlayerIds: ReadonlySet<strin
 }
 
 export function startGame(room: Room, question: Question, now: number, roundId: string = crypto.randomUUID()): Room {
-  if (room.phase !== "lobby") throw new GameError("The round has already started")
-  if (room.players.length === 0) throw new GameError("Wait for at least one player")
+  if (room.phase !== "lobby") throw new GameError("already_started")
+  if (room.players.length === 0) throw new GameError("no_players")
   return {
     ...room,
     asked: [question],
@@ -436,9 +437,9 @@ export function startGame(room: Room, question: Question, now: number, roundId: 
 export function submitChoice(room: Room, playerId: string, choiceIndex: number, now: number): Room {
   assertQuestionOpen(room, now)
   requirePlayer(room, playerId)
-  if (!isChoiceIndex(choiceIndex)) throw new GameError("Pick one of the four answers")
+  if (!isChoiceIndex(choiceIndex)) throw new GameError("bad_choice")
   const current = room.answers[playerId]
-  if (current?.locked) throw new GameError("Answer is locked")
+  if (current?.locked) throw new GameError("answer_locked")
   return {
     ...room,
     answers: {
@@ -452,7 +453,7 @@ export function lockAnswer(room: Room, playerId: string, now: number): Room {
   assertQuestionOpen(room, now)
   requirePlayer(room, playerId)
   const current = room.answers[playerId]
-  if (!current) throw new GameError("Pick an answer first")
+  if (!current) throw new GameError("pick_first")
   if (current.locked) return room
   return {
     ...room,
@@ -468,15 +469,15 @@ export function updateSettings(room: Room, input: RoomSettings, now: number): Ro
     input.questionDurationMs,
     ANSWER_TIME_MIN_MS,
     ANSWER_TIME_MAX_MS,
-    "Answer time",
+    "answer_time_range",
   )
   const revealDurationMs = readSettingDuration(
     input.revealDurationMs,
     NEXT_TIME_MIN_MS,
     NEXT_TIME_MAX_MS,
-    "Time to the next question",
+    "next_time_range",
   )
-  if (typeof input.autoAdvance !== "boolean") throw new GameError("Choose whether to advance automatically")
+  if (typeof input.autoAdvance !== "boolean") throw new GameError("bad_request")
   const difficulty = requireDifficultyBand(input.difficulty)
   const next: Room = {
     ...room,
@@ -496,7 +497,7 @@ export function updateSettings(room: Room, input: RoomSettings, now: number): Ro
 }
 
 export function toggleAdvancePause(room: Room, now: number): Room {
-  if (room.phase !== "reveal" || !room.autoAdvance) throw new GameError("Nothing to pause")
+  if (room.phase !== "reveal" || !room.autoAdvance) throw new GameError("nothing_to_pause")
   if (!room.advancePaused) {
     return {
       ...room,
@@ -556,7 +557,7 @@ export function applyTick(room: Room, now: number): Room {
 
 export function reveal(room: Room, now: number): Room {
   if (room.phase !== "question" || room.questionStartedAt == null) {
-    throw new GameError("No question is open")
+    throw new GameError("no_question_open")
   }
   const question = currentQuestion(room)
   const elapsedNow = Math.min(
@@ -621,7 +622,7 @@ export function reveal(room: Room, now: number): Room {
 }
 
 export function nextQuestion(room: Room, question: Question | null, now: number): Room {
-  if (room.phase !== "reveal") throw new GameError("Reveal the answer before moving on")
+  if (room.phase !== "reveal") throw new GameError("reveal_first")
   if (question == null || room.asked.length >= room.questionLimit) {
     return {
       ...room,
@@ -645,7 +646,7 @@ export function nextQuestion(room: Room, question: Question | null, now: number)
 }
 
 export function endGame(room: Room): Room {
-  if (room.phase === "lobby") throw new GameError("The round has not started")
+  if (room.phase === "lobby") throw new GameError("not_started")
   if (room.phase === "finished") return room
   return {
     ...room,
@@ -715,8 +716,8 @@ export function snapshotFor(room: Room, viewer: Viewer, now: number, lanAddresse
 
 export function normalizeName(input: string): string {
   const name = input.replace(/[\u0000-\u001f]/g, "").replace(/\s+/g, " ").trim()
-  if (!name) throw new GameError("Enter a name")
-  if (name.length > MAX_NAME_LENGTH) throw new GameError("Use a shorter name")
+  if (!name) throw new GameError("name_empty")
+  if (name.length > MAX_NAME_LENGTH) throw new GameError("name_too_long")
   return name
 }
 
@@ -749,7 +750,7 @@ function readyView(room: Room, now: number): PublicReady | null {
 
 function playerView(room: Room, playerId: string): PlayerView {
   const player = room.players.find((item) => item.id === playerId)
-  if (!player) throw new GameError("Rejoin the room")
+  if (!player) throw new GameError("rejoin")
   const answer = room.answers[playerId]
   return {
     role: "player",
@@ -779,7 +780,7 @@ function queueRevealedPlay(room: Room, question: Question, results: readonly Rev
 
 function currentQuestion(room: Room): Question {
   const question = room.asked[room.questionIndex]
-  if (!question) throw new GameError("No question is open")
+  if (!question) throw new GameError("no_question_open")
   return question
 }
 
@@ -829,16 +830,16 @@ function revealWaitMs(room: Room, now: number): number | null {
   return answerLeft + READY_DURATION_MS
 }
 
-function readSettingDuration(value: number, min: number, max: number, label: string): number {
+function readSettingDuration(value: number, min: number, max: number, code: ErrorCode): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) {
-    throw new GameError(`${label} needs to be between ${min / 1000} and ${max / 1000} seconds`)
+    throw new GameError(code)
   }
   return value
 }
 
 function requireDifficultyBand(value: unknown): DifficultyBand {
   if (value === "mixed" || value === "1-2" || value === "2-4" || value === "4-5") return value
-  throw new GameError("Pick a difficulty")
+  throw new GameError("bad_request")
 }
 
 function remainingMs(room: Room, now: number): number {
@@ -853,16 +854,16 @@ function elapsed(room: Room, now: number): number {
 
 function assertQuestionOpen(room: Room, now: number): void {
   if (room.phase !== "question" || room.questionStartedAt == null) {
-    throw new GameError("No question is open")
+    throw new GameError("no_question_open")
   }
   if (now >= room.questionStartedAt + room.questionDurationMs) {
-    throw new GameError("Time is up")
+    throw new GameError("time_up")
   }
 }
 
 function requirePlayer(room: Room, playerId: string): Player {
   const player = room.players.find((item) => item.id === playerId)
-  if (!player) throw new GameError("Rejoin the room")
+  if (!player) throw new GameError("rejoin")
   return player
 }
 

@@ -17,7 +17,6 @@ import {
   type MigrationDatabase,
   type StatementDatabase,
 } from "../server/catalog.ts"
-import { GameError } from "../server/game.ts"
 import { sqlStatements } from "../server/sql-script.ts"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
@@ -270,7 +269,7 @@ describe("question catalog", () => {
             is_correct: 1,
           },
         ]),
-      (error: unknown) => error instanceof GameError && /four answers/.test(error.message),
+      (error: unknown) => error instanceof Error && /four answers/.test(error.message),
     )
   })
 })

@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers"
+import type { ErrorCode } from "../shared/errors.ts"
 import { type HostSession, type PlayerSession } from "../shared/types.ts"
 import { parseClientMessage, type ClientMessage } from "../shared/wire.ts"
 import {
@@ -75,16 +76,16 @@ export class RoomDurableObject extends DurableObject<Env> {
     const command = parseClientMessage(parsed)
     const id = isRecord(parsed) && typeof parsed.id === "string" ? parsed.id : null
     if (!command) {
-      if (id) ws.send(JSON.stringify({ id, ok: false, error: "Something went wrong" }))
+      if (id) ws.send(JSON.stringify({ id, ok: false, error: "bad_request" }))
       return
     }
     try {
       const data = await this.handle(ws, command)
       ws.send(JSON.stringify({ id: command.id, ok: true, data }))
     } catch (error) {
-      const text = error instanceof GameError ? error.message : "Something went wrong"
+      const code: ErrorCode = error instanceof GameError ? error.code : "server_error"
       if (!(error instanceof GameError)) console.error(error)
-      ws.send(JSON.stringify({ id: command.id, ok: false, error: text }))
+      ws.send(JSON.stringify({ id: command.id, ok: false, error: code }))
     }
   }
 
@@ -174,7 +175,7 @@ export class RoomDurableObject extends DurableObject<Env> {
         return null
       }
       default:
-        throw new GameError("Something went wrong")
+        throw new GameError("bad_request")
     }
   }
 
@@ -182,7 +183,7 @@ export class RoomDurableObject extends DurableObject<Env> {
     const room = this.readRoom()
     const code = payload.code.trim().toUpperCase()
     if (!room || room.hostToken !== payload.hostToken || room.code !== code) {
-      throw new GameError("Room not found")
+      throw new GameError("room_not_found")
     }
     ws.serializeAttachment({ role: "host" } satisfies Seat)
     const now = Date.now()
@@ -192,9 +193,9 @@ export class RoomDurableObject extends DurableObject<Env> {
 
   private async join(ws: WebSocket, payload: { code: string; name: string }): Promise<PlayerSession> {
     const room = this.readRoom()
-    if (!room) throw new GameError("Room not found")
+    if (!room) throw new GameError("room_not_found")
     const code = payload.code.trim().toUpperCase()
-    if (code !== room.code) throw new GameError("Room not found")
+    if (code !== room.code) throw new GameError("room_not_found")
     const name = normalizeName(payload.name)
     const seated = this.sessionForSeat(ws, room, name)
     if (seated) return seated
@@ -227,9 +228,9 @@ export class RoomDurableObject extends DurableObject<Env> {
     payload: { code: string; playerId: string; token: string },
   ): Promise<PlayerSession> {
     const room = this.readRoom()
-    if (!room) throw new GameError("Room not found")
+    if (!room) throw new GameError("room_not_found")
     const code = payload.code.trim().toUpperCase()
-    if (code !== room.code) throw new GameError("Room not found")
+    if (code !== room.code) throw new GameError("room_not_found")
     const now = Date.now()
     const ticked = applyTick(room, now)
     let reconnected: Room
@@ -241,7 +242,7 @@ export class RoomDurableObject extends DurableObject<Env> {
     }
     const next = applyTick(reconnected, now)
     const player = next.players.find((item) => item.id === payload.playerId)
-    if (!player) throw new GameError("Rejoin the room")
+    if (!player) throw new GameError("rejoin")
     ws.serializeAttachment({ role: "player", playerId: player.id } satisfies Seat)
     await this.commit(next, now)
     return { code, playerId: player.id, token: player.token, name: player.name }
@@ -249,7 +250,7 @@ export class RoomDurableObject extends DurableObject<Env> {
 
   private async deal(room: Room): Promise<{ room: Room; question: Question }> {
     const dealt = await this.dealOrFinish(room)
-    if (!dealt.question) throw new GameError("No questions available")
+    if (!dealt.question) throw new GameError("no_questions")
     return { room: dealt.room, question: dealt.question }
   }
 
@@ -282,7 +283,7 @@ export class RoomDurableObject extends DurableObject<Env> {
 
   private async mutate(run: (room: Room, now: number) => Room | Promise<Room>): Promise<void> {
     const room = this.readRoom()
-    if (!room) throw new GameError("Room not found")
+    if (!room) throw new GameError("room_not_found")
     const now = Date.now()
     const ticked = applyTick(room, now)
     let mutated: Room
@@ -382,12 +383,12 @@ export class RoomDurableObject extends DurableObject<Env> {
 
   private requireHost(ws: WebSocket): void {
     const seat = readSeat(ws)
-    if (!seat || seat.role !== "host") throw new GameError("Open the host screen first")
+    if (!seat || seat.role !== "host") throw new GameError("host_only")
   }
 
   private requirePlayer(ws: WebSocket): { playerId: string } {
     const seat = readSeat(ws)
-    if (!seat || seat.role !== "player") throw new GameError("Join a room first")
+    if (!seat || seat.role !== "player") throw new GameError("join_first")
     return { playerId: seat.playerId }
   }
 

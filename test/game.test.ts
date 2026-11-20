@@ -107,7 +107,7 @@ describe("joining", () => {
 
   it("rejects a duplicate name while that player is connected", () => {
     const room = addPlayer(roomWith(), "p1", "Ada")
-    assert.throws(() => addPlayer(room, "p2", "ada"), /taken/)
+    assert.throws(() => addPlayer(room, "p2", "ada"), /name_taken/)
   })
 
   it("lets a disconnected player reclaim the same name", () => {
@@ -135,13 +135,13 @@ describe("joining", () => {
     const room = addPlayer(roomWith(), "p1", "Ada")
     const present = withLiveConnections(room, new Set(["p1"]))
     assert.equal(present, room)
-    assert.throws(() => joinPlayer(present, { id: "p2", name: "ada", token: "new" }), /taken/)
+    assert.throws(() => joinPlayer(present, { id: "p2", name: "ada", token: "new" }), /name_taken/)
   })
 
   it("refuses a new player after the round starts", () => {
     let room = addPlayer(roomWith(), "p1", "Ada")
     room = playing(room, question("a", 0), 0)
-    assert.throws(() => addPlayer(room, "p2", "Bea"), /already started/)
+    assert.throws(() => addPlayer(room, "p2", "Bea"), /already_started/)
   })
 })
 
@@ -154,7 +154,7 @@ describe("answers", () => {
     room = submitChoice(room, "p1", 0, 1_400)
     room = submitChoice(room, "p2", 3, 1_500)
     room = lockAnswer(room, "p1", 2_000)
-    assert.throws(() => submitChoice(room, "p1", 2, 2_100), /locked/)
+    assert.throws(() => submitChoice(room, "p1", 2, 2_100), /answer_locked/)
     assert.equal(room.answers.p1?.choiceIndex, 0)
     assert.equal(room.answers.p2?.choiceIndex, 3)
     assert.equal(room.answers.p2?.locked, false)
@@ -163,7 +163,7 @@ describe("answers", () => {
   it("ignores an answer after the timer", () => {
     let room = addPlayer(roomWith(), "p1", "Ada")
     room = playing(room, question("a", 0), 0)
-    assert.throws(() => submitChoice(room, "p1", 0, duration), /Time is up/)
+    assert.throws(() => submitChoice(room, "p1", 0, duration), /time_up/)
   })
 
   it("reveals when the timer expires and scores an unlocked pick slowly", () => {
@@ -484,8 +484,8 @@ describe("get ready", () => {
     assert.equal(room.questionStartedAt, null)
     assert.equal(room.readyUntil, 1_000 + READY_DURATION_MS)
     assert.equal(alarmAt(room), 1_000 + READY_DURATION_MS)
-    assert.throws(() => submitChoice(room, "p1", 0, 1_100), /No question is open/)
-    assert.throws(() => lockAnswer(room, "p1", 1_100), /No question is open/)
+    assert.throws(() => submitChoice(room, "p1", 0, 1_100), /no_question_open/)
+    assert.throws(() => lockAnswer(room, "p1", 1_100), /no_question_open/)
 
     const during = snapshotFor(room, { role: "player", playerId: "p1" }, 1_500, [])
     assert.equal(during.phase, "ready")

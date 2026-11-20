@@ -1,3 +1,4 @@
+import type { ErrorCode } from "../shared/errors.ts"
 import type { HostSession } from "../shared/types.ts"
 import { GameError } from "../server/game.ts"
 import { CatalogDurableObject } from "./catalog.ts"
@@ -32,11 +33,11 @@ async function openRoom(env: Env): Promise<Response> {
         return Response.json(created satisfies HostSession, { status: 201 })
       }
     }
-    return Response.json({ error: "Could not open a room" }, { status: 503 })
+    return Response.json({ error: "could_not_open_room" satisfies ErrorCode }, { status: 503 })
   } catch (error) {
-    const message = error instanceof GameError ? error.message : "Could not open a room"
+    const code: ErrorCode = error instanceof GameError ? error.code : "could_not_open_room"
     if (!(error instanceof GameError)) console.error(error)
-    return Response.json({ error: message }, { status: 500 })
+    return Response.json({ error: code }, { status: 500 })
   }
 }
 

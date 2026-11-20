@@ -1,3 +1,4 @@
+import type { ErrorCode } from "./errors.ts"
 export const QUESTION_DURATION_MS = 20_000
 export const QUESTIONS_PER_ROUND = 10
 export const BASE_POINTS = 500
@@ -113,7 +114,7 @@ export interface PlayerSession {
   name: string
 }
 
-export type Ack<T> = { ok: true; data: T } | { ok: false; error: string }
+export type Ack<T> = { ok: true; data: T } | { ok: false; error: ErrorCode }
 
 export interface ClientToServerEvents {
   "host:create": (ack: (res: Ack<HostSession>) => void) => void

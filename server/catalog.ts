@@ -1,5 +1,5 @@
 import type { ChoiceIndex } from "../shared/types.ts"
-import { GameError, type Question } from "./game.ts"
+import type { Question } from "./game.ts"
 import { sqlStatements } from "./sql-script.ts"
 
 const BASELINE_MIGRATIONS = ["0001_questions.sql", "0002_seed.sql"]
@@ -61,12 +61,12 @@ interface QuestionStatRow {
 
 function readPlayText(value: string, label: string): string {
   const text = value.trim()
-  if (!text) throw new GameError(`Missing ${label}`)
+  if (!text) throw new Error(`Missing ${label}`)
   return text
 }
 
 function readPlayCount(value: number, label: string): number {
-  if (!Number.isInteger(value) || value < 0) throw new GameError(`Invalid ${label}`)
+  if (!Number.isInteger(value) || value < 0) throw new Error(`Invalid ${label}`)
   return value
 }
 
@@ -268,7 +268,7 @@ export function questionsFromRows(rows: readonly QuestionRow[]): Question[] {
 
 function questionFromRows(rows: readonly QuestionRow[]): Question {
   const first = rows[0]
-  if (!first) throw new GameError("Question is missing")
+  if (!first) throw new Error("Question is missing")
   const choices = readChoices(first.id, rows)
   const text = readQuestionText(first)
   return {
@@ -285,33 +285,33 @@ function readChoices(
   id: string,
   rows: readonly QuestionRow[],
 ): { choices: [string, string, string, string]; correctIndex: ChoiceIndex } {
-  if (rows.length !== 4) throw new GameError(`Question ${id} needs four answers`)
+  if (rows.length !== 4) throw new Error(`Question ${id} needs four answers`)
   const choices = ["", "", "", ""] as [string, string, string, string]
   let correctIndex: ChoiceIndex | null = null
   for (const row of rows) {
     const slot = readChoiceSlot(id, row)
-    if (choices[slot.position] !== "") throw new GameError(`Question ${id} repeats an answer slot`)
+    if (choices[slot.position] !== "") throw new Error(`Question ${id} repeats an answer slot`)
     choices[slot.position] = slot.text
     if (!slot.correct) continue
-    if (correctIndex != null) throw new GameError(`Question ${id} has more than one correct answer`)
+    if (correctIndex != null) throw new Error(`Question ${id} has more than one correct answer`)
     correctIndex = slot.position
   }
-  if (correctIndex == null) throw new GameError(`Question ${id} has no correct answer`)
+  if (correctIndex == null) throw new Error(`Question ${id} has no correct answer`)
   return { choices, correctIndex }
 }
 
 function readChoiceSlot(id: string, row: QuestionRow): { position: ChoiceIndex; text: string; correct: boolean } {
-  if (!isChoiceIndex(row.position)) throw new GameError(`Question ${id} has an invalid answer slot`)
+  if (!isChoiceIndex(row.position)) throw new Error(`Question ${id} has an invalid answer slot`)
   const text = row.text.trim()
-  if (!text) throw new GameError(`Question ${id} has an empty answer`)
+  if (!text) throw new Error(`Question ${id} has an empty answer`)
   return { position: row.position, text, correct: Number(row.is_correct) === 1 }
 }
 
 function readQuestionText(row: QuestionRow): { prompt: string; category: string } {
   const prompt = row.prompt.trim()
   const category = row.category.trim()
-  if (!prompt) throw new GameError(`Question ${row.id} is missing a prompt`)
-  if (!category) throw new GameError(`Question ${row.id} is missing a category`)
+  if (!prompt) throw new Error(`Question ${row.id} is missing a prompt`)
+  if (!category) throw new Error(`Question ${row.id} is missing a category`)
   return { prompt, category }
 }
 

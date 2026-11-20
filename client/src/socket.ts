@@ -1,5 +1,14 @@
 import { DIFFICULTY_BANDS, type Ack, type ClientToServerEvents, type HostSession, type RoomSettings, type RoomSnapshot } from "@shared/types"
 import type { ClientMessage } from "@shared/wire"
+import { isErrorCode, type ErrorCode } from "@shared/errors"
+import { errorCode, errorText } from "./errors"
+
+export class QuizError extends Error {
+  constructor(readonly code: ErrorCode) {
+    super(errorText(code))
+    this.name = "QuizError"
+  }
+}
 
 type PayloadMessage = Extract<ClientMessage, { payload: unknown }>
 type PayloadEvent = PayloadMessage["event"]
@@ -54,8 +63,7 @@ class QuizSocket {
     void this.dispatch(event, body)
       .then((data) => ack?.({ ok: true, data }))
       .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : "Something went wrong"
-        ack?.({ ok: false, error: message })
+        ack?.({ ok: false, error: errorCode(error) })
       })
   }
 
@@ -65,7 +73,7 @@ class QuizSocket {
     if (message.event === "host:attach" || message.event === "player:join" || message.event === "player:attach") {
       await this.ensure(message.payload.code)
     } else if (this.ws?.readyState !== WebSocket.OPEN) {
-      throw new Error("Reconnecting to the table")
+      throw new QuizError("reconnecting")
     }
     return this.rpc(message)
   }
@@ -76,14 +84,11 @@ class QuizSocket {
     try {
       body = await response.json()
     } catch {
-      throw new Error("Could not open a room")
+      throw new QuizError("could_not_open_room")
     }
     if (!response.ok || !isHostSession(body)) {
-      const message =
-        body && typeof body === "object" && "error" in body && typeof body.error === "string"
-          ? body.error
-          : "Could not open a room"
-      throw new Error(message)
+      const code = isRecord(body) && isErrorCode(body.error) ? body.error : "could_not_open_room"
+      throw new QuizError(code)
     }
     await this.ensure(body.code)
     await this.rpc({
@@ -137,7 +142,7 @@ class QuizSocket {
           if (this.ws !== ws) return
           if (!settled) {
             settled = true
-            reject(new Error("Could not reach the table"))
+            reject(new QuizError("unreachable"))
           }
           ws.close()
         },
@@ -150,7 +155,7 @@ class QuizSocket {
       ws.addEventListener("close", () => {
         if (this.ws !== ws) return
         this.ws = null
-        this.failPending("Reconnecting to the table")
+        this.failPending("reconnecting")
         this.setConnected(false)
         this.scheduleReconnect()
       })
@@ -169,16 +174,16 @@ class QuizSocket {
 
   private rpc(message: ClientMessage): Promise<unknown> {
     const ws = this.ws
-    if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error("Reconnecting to the table"))
+    if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.reject(new QuizError("reconnecting"))
     return new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => {
         this.pending.delete(message.id)
-        reject(new Error("The table did not answer"))
+        reject(new QuizError("no_reply"))
       }, 8000)
       this.pending.set(message.id, (res) => {
         window.clearTimeout(timer)
         if (res.ok) resolve(res.data)
-        else reject(new Error(res.error))
+        else reject(new QuizError(res.error))
       })
       ws.send(JSON.stringify(message))
     })
@@ -201,10 +206,10 @@ class QuizSocket {
     if (!ack) return
     this.pending.delete(message.id)
     if (message.ok === true) ack({ ok: true, data: message.data })
-    else ack({ ok: false, error: typeof message.error === "string" ? message.error : "Something went wrong" })
+    else ack({ ok: false, error: isErrorCode(message.error) ? message.error : "server_error" })
   }
 
-  private failPending(error: string): void {
+  private failPending(error: ErrorCode): void {
     for (const ack of this.pending.values()) ack({ ok: false, error })
     this.pending.clear()
   }
@@ -233,27 +238,27 @@ function clientMessage(event: string, payload: unknown): ClientMessage {
     case "player:lock":
       return { id, event }
     case "host:attach": {
-      if (!isCodeToken(payload)) throw new Error("Room not found")
+      if (!isCodeToken(payload)) throw new QuizError("room_not_found")
       return { id, event, payload }
     }
     case "player:join": {
-      if (!isCodeName(payload)) throw new Error("Room not found")
+      if (!isCodeName(payload)) throw new QuizError("room_not_found")
       return { id, event, payload }
     }
     case "player:attach": {
-      if (!isPlayerAttach(payload)) throw new Error("Rejoin the room")
+      if (!isPlayerAttach(payload)) throw new QuizError("rejoin")
       return { id, event, payload }
     }
     case "player:choose": {
-      if (!isRecord(payload) || typeof payload.choiceIndex !== "number") throw new Error("Something went wrong")
+      if (!isRecord(payload) || typeof payload.choiceIndex !== "number") throw new QuizError("bad_request")
       return { id, event, payload: { choiceIndex: payload.choiceIndex } }
     }
     case "host:settings": {
-      if (!isSettings(payload)) throw new Error("Something went wrong")
+      if (!isSettings(payload)) throw new QuizError("bad_request")
       return { id, event, payload }
     }
     default:
-      throw new Error("Something went wrong")
+      throw new QuizError("bad_request")
   }
 }
 
@@ -299,7 +304,7 @@ export function request<T>(emit: (ack: (res: Ack<T>) => void) => void): Promise<
   return new Promise((resolve, reject) => {
     emit((res) => {
       if (res.ok) resolve(res.data)
-      else reject(new Error(res.error))
+      else reject(new QuizError(res.error))
     })
   })
 }
