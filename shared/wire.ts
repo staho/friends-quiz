@@ -12,6 +12,8 @@ export type ClientMessage =
   | { id: string; event: "player:attach"; payload: { code: string; playerId: string; token: string } }
   | { id: string; event: "player:choose"; payload: { choiceIndex: number } }
   | { id: string; event: "player:lock" }
+  | { id: string; event: "player:leave" }
+  | { id: string; event: "host:remove"; payload: { playerId: string } }
 
 export function parseClientMessage(value: unknown): ClientMessage | null {
   if (!isRecord(value) || typeof value.id !== "string" || value.id === "") return null
@@ -23,6 +25,7 @@ export function parseClientMessage(value: unknown): ClientMessage | null {
     case "host:end":
     case "host:reset":
     case "player:lock":
+    case "player:leave":
       return { id, event: value.event }
     case "host:attach": {
       const payload = value.payload
@@ -56,6 +59,11 @@ export function parseClientMessage(value: unknown): ClientMessage | null {
       const payload = value.payload
       if (!isRecord(payload) || typeof payload.choiceIndex !== "number") return null
       return { id, event: "player:choose", payload: { choiceIndex: payload.choiceIndex } }
+    }
+    case "host:remove": {
+      const payload = value.payload
+      if (!isRecord(payload) || typeof payload.playerId !== "string" || payload.playerId === "") return null
+      return { id, event: "host:remove", payload: { playerId: payload.playerId } }
     }
     case "host:settings": {
       const payload = readSettings(value.payload)

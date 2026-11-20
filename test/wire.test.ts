@@ -62,4 +62,26 @@ describe("client messages", () => {
       null,
     )
   })
+
+  it("accepts a host remove with a player id", () => {
+    assert.deepEqual(parseClientMessage({ id: "1", event: "host:remove", payload: { playerId: "p1" } }), {
+      id: "1",
+      event: "host:remove",
+      payload: { playerId: "p1" },
+    })
+  })
+
+  it("rejects a host remove without a player id", () => {
+    assert.equal(parseClientMessage({ id: "1", event: "host:remove" }), null)
+    assert.equal(parseClientMessage({ id: "1", event: "host:remove", payload: {} }), null)
+    assert.equal(parseClientMessage({ id: "1", event: "host:remove", payload: { playerId: "" } }), null)
+    assert.equal(parseClientMessage({ id: "1", event: "host:remove", payload: { playerId: 4 } }), null)
+  })
+
+  it("accepts a leave with no payload", () => {
+    assert.deepEqual(parseClientMessage({ id: "1", event: "player:leave" }), {
+      id: "1",
+      event: "player:leave",
+    })
+  })
 })

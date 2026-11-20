@@ -74,6 +74,7 @@ interface QuestionRow {
   id: string
   prompt: string
   category: string
+  category_label: string | null
   difficulty: number
   position: number
   text: string
@@ -154,10 +155,11 @@ export async function pickRandomQuestion(
   excludeIds: readonly string[] = [],
   difficulty?: number,
   bounds?: DifficultyBounds,
+  categoryCounts: Record<string, number> = {},
 ): Promise<Question | null> {
   const levels = levelsToTry(difficulty, bounds)
   for (const level of levels) {
-    const id = await pickQuestionId(db, excludeIds, level)
+    const id = await pickQuestionId(db, excludeIds, level, categoryCounts)
     if (!id) continue
     const questions = await listQuestions(db, { ids: [id] })
     if (questions[0]) return questions[0]
@@ -190,22 +192,26 @@ async function pickQuestionId(
   db: StatementDatabase,
   excludeIds: readonly string[],
   difficulty: number | null,
+  categoryCounts: Record<string, number>,
 ): Promise<string | null> {
-  const conditions = ["active = 1"]
   const params: unknown[] = []
+  let level = ""
   if (difficulty != null) {
-    conditions.push("difficulty = ?")
+    level = "AND q.difficulty = ?"
     params.push(difficulty)
   }
-  if (excludeIds.length > 0) {
-    conditions.push(`id NOT IN (${excludeIds.map(() => "?").join(", ")})`)
-    params.push(...excludeIds)
-  }
-  const statement = db.prepare(
-    `SELECT id FROM questions WHERE ${conditions.join(" AND ")} ORDER BY RANDOM() LIMIT 1`,
-  )
-  const picked =
-    params.length > 0 ? await statement.bind(...params).all<{ id: string }>() : await statement.all<{ id: string }>()
+  params.push(JSON.stringify(excludeIds), JSON.stringify(categoryCounts))
+  const picked = await db
+    .prepare(
+      `SELECT q.id FROM questions q
+       WHERE q.active = 1
+         ${level}
+         AND q.id NOT IN (SELECT value FROM json_each(?))
+       ORDER BY COALESCE((SELECT c.value FROM json_each(?) c WHERE c.key = q.category), 0), RANDOM()
+       LIMIT 1`,
+    )
+    .bind(...params)
+    .all<{ id: string }>()
   return picked.results[0]?.id ?? null
 }
 
@@ -229,24 +235,26 @@ export async function listQuestions(
   }
   const exclude = filter.excludeIds ?? []
   if (exclude.length > 0) {
-    conditions.push(`q.id NOT IN (${exclude.map(() => "?").join(", ")})`)
-    params.push(...exclude)
+    conditions.push("q.id NOT IN (SELECT value FROM json_each(?))")
+    params.push(JSON.stringify(exclude))
   }
   const ids = filter.ids ?? []
   if (ids.length > 0) {
-    conditions.push(`q.id IN (${ids.map(() => "?").join(", ")})`)
-    params.push(...ids)
+    conditions.push("q.id IN (SELECT value FROM json_each(?))")
+    params.push(JSON.stringify(ids))
   }
   const sql = `
     SELECT
       q.id,
       q.prompt,
       q.category,
+      COALESCE(cat.label, q.category) AS category_label,
       q.difficulty,
       c.position,
       c.text,
       c.is_correct
     FROM questions q
+    LEFT JOIN categories cat ON cat.id = q.category
     INNER JOIN choices c ON c.question_id = q.id
     WHERE ${conditions.join(" AND ")}
     ORDER BY q.id, c.position
@@ -277,6 +285,7 @@ function questionFromRows(rows: readonly QuestionRow[]): Question {
     choices: choices.choices,
     correctIndex: choices.correctIndex,
     category: text.category,
+    categoryLabel: text.categoryLabel,
     difficulty: Number(first.difficulty),
   }
 }
@@ -307,12 +316,12 @@ function readChoiceSlot(id: string, row: QuestionRow): { position: ChoiceIndex; 
   return { position: row.position, text, correct: Number(row.is_correct) === 1 }
 }
 
-function readQuestionText(row: QuestionRow): { prompt: string; category: string } {
+function readQuestionText(row: QuestionRow): { prompt: string; category: string; categoryLabel: string } {
   const prompt = row.prompt.trim()
   const category = row.category.trim()
   if (!prompt) throw new Error(`Question ${row.id} is missing a prompt`)
   if (!category) throw new Error(`Question ${row.id} is missing a category`)
-  return { prompt, category }
+  return { prompt, category, categoryLabel: row.category_label?.trim() || category }
 }
 
 function isChoiceIndex(value: number): value is ChoiceIndex {
