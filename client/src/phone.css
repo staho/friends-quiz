@@ -1,0 +1,48 @@
+/* Phone-only rules. Imported after styles.css so equal-specificity rules here win. */
+
+.phone-head {
+  align-items: center;
+  gap: 12px;
+}
+
+.phone-head .timer {
+  flex: 1;
+  min-width: 0;
+  gap: 10px;
+}
+
+.phone-head .timer-track { height: 12px; }
+
+.phone-head .timer-seconds {
+  font-size: 1.3rem;
+  text-align: right;
+}
+
+.phone-head > strong {
+  padding-left: 12px;
+  border-left: 2px solid var(--line);
+}
+
+.place-line {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+@media (max-width: 360px) {
+  .phone-wait { gap: 8px; }
+  .phone-wait h1 { font-size: 1.6rem; }
+  .phone-wait .answer-grid { margin-top: 0; gap: 6px; }
+  .phone-wait .answer {
+    min-height: 44px;
+    padding: 8px 10px;
+  }
+  .phone-wait .answer .letter {
+    width: 28px;
+    height: 28px;
+    font-size: 1rem;
+  }
+  .phone-wait .answer .label { font-size: 1rem; }
+  .phone-wait.reveal .hint { display: none; }
+  .place-line { font-size: 1rem; }
+}

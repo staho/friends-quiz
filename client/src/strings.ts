@@ -158,6 +158,13 @@ export const t = {
   // --- end WP5 TV data ---
 
   // --- WP6 phone ---
+  roomGone: "Tego pokoju już nie ma. Poproś o nowy kod z telewizora.",
+  seatLost: "Dołącz jeszcze raz.",
+  removedByHost: "Usunięto cię z gry.",
+  youLead: "1. miejsce · prowadzisz",
+  tiedFirst: "1. miejsce ex aequo",
+  placeGap: "{rank}. miejsce · {gap} do lidera",
+  joinedLateWait: "Runda już trwa. Wskakujesz od następnego pytania.",
   // --- end WP6 phone ---
 
   // --- WP7 meta ---
