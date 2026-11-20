@@ -1,6 +1,7 @@
 import { DIFFICULTY_BANDS, type Ack, type ClientToServerEvents, type HostSession, type RoomSettings, type RoomSnapshot } from "@shared/types"
 import type { ClientMessage } from "@shared/wire"
 import { isErrorCode, type ErrorCode } from "@shared/errors"
+import { reconnectDelay } from "./backoff"
 import { errorCode, errorText } from "./errors"
 
 export class QuizError extends Error {
@@ -25,19 +26,68 @@ type ConnectionListener = () => void
 type AckListener = (res: Ack<unknown>) => void
 
 class QuizSocket {
-  connected = false
+  connected = true
   private ws: WebSocket | null = null
   private code: string | null = null
   private opening: Promise<void> | null = null
   private openingCode: string | null = null
   private reconnectTimer: number | null = null
+  private attempt = 0
+  private heartbeat: number | null = null
+  private deadline: number | null = null
   private pending = new Map<string, AckListener>()
   private stateListeners = new Set<StateListener>()
   private connectListeners = new Set<ConnectionListener>()
   private disconnectListeners = new Set<ConnectionListener>()
 
   constructor() {
-    queueMicrotask(() => this.setConnected(true))
+    const wake = () => {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.sendPing()
+      } else if (this.code) {
+        this.clearReconnect()
+        this.attempt = 0
+        void this.ensure(this.code).catch(() => this.scheduleReconnect())
+      }
+    }
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") wake()
+    })
+    window.addEventListener("online", wake)
+  }
+
+  private clearReconnect(): void {
+    if (this.reconnectTimer != null) {
+      window.clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+  }
+
+  private sendPing(): void {
+    const ws = this.ws
+    if (!ws || ws.readyState !== WebSocket.OPEN || this.deadline != null) return
+    try {
+      ws.send("ping")
+    } catch {
+      ws.close()
+      return
+    }
+    this.deadline = window.setTimeout(() => {
+      this.deadline = null
+      ws.close()
+    }, 8000)
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat()
+    this.heartbeat = window.setInterval(() => this.sendPing(), 20000)
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeat != null) window.clearInterval(this.heartbeat)
+    if (this.deadline != null) window.clearTimeout(this.deadline)
+    this.heartbeat = null
+    this.deadline = null
   }
 
   on(event: "state", listener: StateListener): void
@@ -115,10 +165,7 @@ class QuizSocket {
   }
 
   private open(code: string): Promise<void> {
-    if (this.reconnectTimer != null) {
-      window.clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
-    }
+    this.clearReconnect()
     const previous = this.ws
     const ws = new WebSocket(socketUrl(code))
     this.ws = ws
@@ -131,6 +178,8 @@ class QuizSocket {
         () => {
           if (settled || this.ws !== ws) return
           settled = true
+          this.attempt = 0
+          this.startHeartbeat()
           this.setConnected(true)
           resolve()
         },
@@ -150,11 +199,16 @@ class QuizSocket {
       )
       ws.addEventListener("message", (event) => {
         if (this.ws !== ws || typeof event.data !== "string") return
+        if (this.deadline != null) {
+          window.clearTimeout(this.deadline)
+          this.deadline = null
+        }
         this.onMessage(event.data)
       })
       ws.addEventListener("close", () => {
         if (this.ws !== ws) return
         this.ws = null
+        this.stopHeartbeat()
         this.failPending("reconnecting")
         this.setConnected(false)
         this.scheduleReconnect()
@@ -169,7 +223,7 @@ class QuizSocket {
       const code = this.code
       if (!code) return
       void this.ensure(code).catch(() => this.scheduleReconnect())
-    }, 600)
+    }, reconnectDelay(this.attempt++))
   }
 
   private rpc(message: ClientMessage): Promise<unknown> {
@@ -190,6 +244,7 @@ class QuizSocket {
   }
 
   private onMessage(raw: string): void {
+    if (raw === "pong") return
     let message: unknown
     try {
       message = JSON.parse(raw)
