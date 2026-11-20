@@ -1,6 +1,7 @@
 import type { RoomSettings, RoomSnapshot } from "@shared/types"
 import { useCountdown } from "../../useCountdown"
 import { t } from "../../strings"
+import { ConfirmButton } from "./ConfirmButton"
 import { RoundSettings } from "./HostSettings"
 
 export function ReadyBoard({
@@ -26,9 +27,7 @@ export function ReadyBoard({
         {count}
       </p>
       <div className="controls">
-        <button type="button" className="btn ghost" disabled={busy} onClick={onEnd}>
-          {t.end}
-        </button>
+        <ConfirmButton label={t.end} confirmLabel={t.endConfirm} disabled={busy} onConfirm={onEnd} />
       </div>
       <RoundSettings snapshot={snapshot} busy={busy} onSettings={onSettings} />
     </section>

@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react"
 import { CHOICES } from "@shared/types"
 import { t } from "./strings"
 
@@ -60,17 +61,23 @@ export function AnswerGrid({
   )
 }
 
-export function TimerBar({ leftMs, durationMs }: { leftMs: number; durationMs: number }) {
-  const ratio = durationMs <= 0 ? 0 : Math.max(0, Math.min(1, leftMs / durationMs))
+export function TimerBar({
+  remainingMs,
+  durationMs,
+  leftMs,
+}: {
+  remainingMs: number
+  durationMs: number
+  leftMs: number
+}) {
+  const ratio = durationMs <= 0 ? 0 : Math.max(0, Math.min(1, remainingMs / durationMs))
   const seconds = Math.ceil(leftMs / 1000)
-  const urgent = seconds <= 5
+  const urgent = leftMs <= 5000
+  const style = { "--from": ratio, animationDuration: `${Math.max(0, remainingMs)}ms` } as CSSProperties
   return (
     <div className="timer" aria-label={t.secondsLeft(seconds)}>
       <div className="timer-track">
-        <div
-          className={urgent ? "timer-fill urgent" : "timer-fill"}
-          style={{ width: `${ratio * 100}%` }}
-        />
+        <div className={urgent ? "timer-fill urgent" : "timer-fill"} key={remainingMs} style={style} />
       </div>
       <span className={urgent ? "timer-seconds urgent" : "timer-seconds"}>{seconds}</span>
     </div>

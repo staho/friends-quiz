@@ -64,19 +64,43 @@ button { touch-action: manipulation; }
 }
 
 .stage.tv > .lobby,
-.board.question {
-  overflow: auto;
+.stage.tv > .board {
+  overflow: hidden;
+}
+
+.stage.tv .board,
+.stage.tv .lobby {
+  max-width: 1760px;
 }
 
 .board.reveal,
 .board.final {
-  overflow: auto;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  height: 100%;
+  overflow: hidden;
 }
 
-.board.reveal > :not(.scores),
-.board.final > :not(.podium) {
-  flex-shrink: 0;
+.board.final {
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
+
+.board-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.board-foot,
+.board.final > .controls,
+.stage.tv .board.question > .controls {
+  padding: 6px 8px 12px;
+}
+
+.board-foot > .hint,
+.board-foot .controls > .hint { margin: 0; }
+
+.keys-hint { align-self: center; }
 
 .stage-bar {
   display: flex;
@@ -294,7 +318,8 @@ html:-webkit-full-screen body {
 }
 
 .answer.is-dim {
-  opacity: 0.48;
+  opacity: 0.72;
+  filter: saturate(0.35);
 }
 
 .answer.is-wrong .label {
@@ -318,6 +343,13 @@ html:-webkit-full-screen body {
 .timer-fill {
   height: 100%;
   background: linear-gradient(90deg, #ffb703, #ff7a00);
+  transform-origin: left;
+  animation: timer-drain linear forwards;
+}
+
+@keyframes timer-drain {
+  from { transform: scaleX(var(--from, 1)); }
+  to { transform: scaleX(0); }
 }
 
 .timer-fill.urgent { background: #e23b3b; }
@@ -460,63 +492,80 @@ html:-webkit-full-screen body {
 
 .chip.away { opacity: 0.45; }
 
-.scores, .podium {
+.standings {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.board.reveal .scores,
-.board.final .podium {
-  flex: 1 1 auto;
-  min-height: 4.5rem;
-  overflow: auto;
-}
-
-.scores li, .podium li {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 16px;
+  grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--rows, 1), minmax(0, 1fr));
+  grid-auto-flow: column;
+  gap: 8px 16px;
+  container-type: size;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.standings li {
+  display: flex;
   align-items: center;
-  padding: 12px 14px;
+  gap: 0.6em;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 0.7em;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--surface);
-  font-size: 1.35rem;
+  font-size: clamp(0.85rem, min(calc(42cqh / var(--rows, 1)), calc(100cqw / var(--cols, 1) / 14)), 2rem);
   box-shadow: 0 4px 12px rgba(26, 18, 12, 0.04);
 }
 
-.score-name,
-.place-name {
+.standings li.away { opacity: 0.55; }
+
+.st-rank {
+  flex: 0 0 auto;
+  min-width: 1.6ch;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.st-move {
+  flex: 0 0 auto;
+  font-size: 0.7em;
+  color: var(--muted);
+}
+
+.st-name {
+  flex: 1 1 auto;
+  min-width: 6ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+}
+
+.st-score {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.st-detail {
+  flex: 0 4 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.scores li > :not(.score-name),
-.podium li > :not(.place-name) {
-  white-space: nowrap;
+  font-size: 0.8em;
+  font-variant-numeric: tabular-nums;
 }
 
 .gain { color: #128a45; }
 .miss { color: #d4253a; }
 
-.place-1 .place-name { color: #d48900; }
-.place-2 .place-name { color: #5c6b7a; }
-.place-3 .place-name { color: #c26a2d; }
-
-.place-rank {
-  width: 2ch;
-  color: var(--muted);
-}
-
-.podium li {
-  grid-template-columns: auto minmax(0, 1fr) auto;
-}
+.place-1 .st-name { color: #b87500; }
+.place-2 .st-name { color: #4f5e6d; }
+.place-3 .st-name { color: #b05d22; }
 
 .stage.phone {
   max-width: 520px;
@@ -645,7 +694,6 @@ html:-webkit-full-screen body {
       calc(14px + env(safe-area-inset-left));
   }
   .answer { min-height: 76px; }
-  .scores li { font-size: 1.05rem; }
   .answer-grid { grid-template-columns: 1fr; }
   .controls { flex-direction: column; }
   .controls .btn {
@@ -655,31 +703,85 @@ html:-webkit-full-screen body {
   }
 }
 
-@media (max-height: 900px) {
-  .stage.tv .prompt {
-    font-size: clamp(1.45rem, 3.4vw, 2.4rem);
-  }
+.stage.tv .prompt { font-size: clamp(2.4rem, 4.2vw, 5rem); }
+
+.stage.tv .answer .label { font-size: clamp(1.6rem, 2.6vw, 3rem); }
+
+.stage.tv .answer { min-height: 140px; }
+
+.stage.tv .answer .letter {
+  width: 56px;
+  height: 56px;
+  font-size: 1.6rem;
+}
+
+.stage.tv .hint,
+.stage.tv .kicker { font-size: clamp(1.1rem, 1.4vw, 1.6rem); }
+
+.stage.tv .board.reveal .answer-grid { gap: 10px; }
+
+@media (min-width: 1200px) {
+  .stage.tv .board.reveal .answer-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-height: 800px) {
+  .stage.tv .prompt { font-size: clamp(1.8rem, 3.1vw, 3.75rem); }
 
   .stage.tv .answer {
-    min-height: 64px;
-    padding: 10px 12px;
+    min-height: 90px;
+    padding: 10px 14px;
   }
 
-  .stage.tv .answer .label {
-    font-size: clamp(1rem, 1.6vw, 1.25rem);
+  .stage.tv .answer .label { font-size: clamp(1.2rem, 1.95vw, 2.25rem); }
+
+  .stage.tv .answer .letter {
+    width: 42px;
+    height: 42px;
+    font-size: 1.2rem;
   }
+
+  .stage.tv .hint,
+  .stage.tv .kicker { font-size: clamp(0.9rem, 1.05vw, 1.2rem); }
 
   .stage.tv .lobby,
-  .stage.tv .board {
-    gap: 12px;
-  }
+  .stage.tv .board { gap: 10px; }
 
-  .scores li,
-  .podium li {
-    padding: 8px 12px;
-    font-size: 1.05rem;
-    gap: 10px;
-  }
+  .stage.tv .btn { padding: 10px 22px; }
+}
+
+.stage.tv .settings-fold {
+  display: block;
+  position: fixed;
+  right: 24px;
+  bottom: 20px;
+  z-index: 20;
+  max-width: min(420px, calc(100vw - 48px));
+  padding: 10px 16px;
+  box-shadow: 0 8px 24px rgba(26, 18, 12, 0.18);
+}
+
+.stage.tv .settings-fold[open] .settings-fields {
+  margin-top: 14px;
+  max-height: min(60vh, 520px);
+  overflow: auto;
+}
+
+.field-note {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+:focus-visible {
+  outline: 4px solid #1a120c;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 7px #fff;
+}
+
+.btn.armed {
+  background: #e23b3b;
+  color: #fff;
+  border-color: #e23b3b;
 }
 
 @media (prefers-reduced-motion: reduce) {

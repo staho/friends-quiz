@@ -30,17 +30,24 @@ export function RoundSettings({
   return (
     <details className="settings-fold">
       <summary>{t.roundSettings}</summary>
-      <SettingsFields settings={snapshot.settings} busy={busy} onSettings={onSettings} />
+      <SettingsFields
+        settings={snapshot.settings}
+        note={snapshot.phase === "question" ? t.answerTimeNextQuestion : undefined}
+        busy={busy}
+        onSettings={onSettings}
+      />
     </details>
   )
 }
 
 function SettingsFields({
   settings,
+  note,
   busy,
   onSettings,
 }: {
   settings: RoomSettings
+  note?: string
   busy: boolean
   onSettings: (settings: RoomSettings) => void
 }) {
@@ -48,6 +55,7 @@ function SettingsFields({
     <div className="settings-fields">
       <SecondsField
         label={t.answerTime}
+        note={note}
         hint={t.secondsUnit}
         ms={settings.questionDurationMs}
         minMs={ANSWER_TIME_MIN_MS}
@@ -96,6 +104,7 @@ function SettingsFields({
 
 function SecondsField({
   label,
+  note,
   hint,
   ms,
   minMs,
@@ -104,6 +113,7 @@ function SecondsField({
   onMs,
 }: {
   label: string
+  note?: string
   hint: (seconds: number | null) => string
   ms: number
   minMs: number
@@ -141,6 +151,7 @@ function SecondsField({
         />
         <span className="field-hint">{hint(Number.isInteger(Number(draft)) && draft.trim() !== "" ? Number(draft) : null)}</span>
       </span>
+      {note && <span className="field-note">{note}</span>}
     </label>
   )
 }
