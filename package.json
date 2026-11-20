@@ -10,7 +10,8 @@
     "test": "node --import tsx --test test/*.test.ts",
     "test:worker": "node --import tsx --test --test-concurrency=1 test/worker/*.test.ts",
     "check": "node scripts/catalog-migrations.mjs && tsc -p tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit",
-    "types": "wrangler types"
+    "types": "wrangler types",
+    "test:e2e": "npm run build && node --import tsx --test --test-concurrency=1 test/e2e/*.test.ts"
   },
   "dependencies": {
     "qrcode.react": "^4.2.0",
@@ -24,6 +25,7 @@
     "@types/react": "^19.1.6",
     "@types/react-dom": "^19.1.5",
     "@vitejs/plugin-react": "^4.5.2",
+    "playwright-core": "1.64.1",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
     "wrangler": "^4.145.0"
