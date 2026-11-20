@@ -35,6 +35,9 @@ export interface PublicPlayer {
   connected: boolean
   picked: boolean
   locked: boolean
+  /** Pressed Leave mid-round: shown as gone, with no place, until the round ends. */
+  left: boolean
+  /** Competition rank among the players still in the game; 0 for a player who left. */
   rank: number
   previousRank: number | null
 }

@@ -87,4 +87,51 @@ describe("a round in the browser", { timeout: 120_000 }, () => {
     }
     await ala.getByText("Koniec rundy").waitFor()
   })
+
+  it("leaves a round with two taps, and the TV shows the player gone and then drops them", async () => {
+    const tvContext = await browser.newContext({
+      viewport: { width: 1920, height: 1080 },
+      extraHTTPHeaders: { "CF-Connecting-IP": uniqueClientIp() },
+    })
+    const tv = await tvContext.newPage()
+    await tv.goto(`${worker.url}/host`)
+    await tv.locator(".code").waitFor()
+    const label = await tv.locator(".code").getAttribute("aria-label")
+    const code = /[A-Z]{4}/.exec(label ?? "")?.[0]
+    assert.ok(code, `room code in "${label}"`)
+
+    const ala = await phone("Ala", code)
+    const olek = await phone("Olek", code)
+    await tv.locator(".chips li.chip").nth(1).waitFor()
+    await tv.keyboard.press("Enter")
+    await ala.locator(".answer-grid.phone button").first().waitFor()
+
+    // One tap only arms it: Ala is still in the question.
+    await ala.getByRole("button", { name: "Wyjdź", exact: true }).click()
+    await ala.getByRole("button", { name: "Na pewno wyjść?" }).waitFor()
+    assert.equal(await ala.locator(".answer-grid.phone button").count(), 4)
+    // Tapping an answer disarms it again.
+    await ala.locator(".answer-grid.phone button").first().click()
+    await ala.getByRole("button", { name: "Wyjdź", exact: true }).waitFor()
+
+    await ala.getByRole("button", { name: "Wyjdź", exact: true }).click()
+    await ala.getByRole("button", { name: "Na pewno wyjść?" }).click()
+    await ala.locator("form.join").waitFor()
+
+    // Olek is the only player left, so locking him in reveals the question; Ala shows as gone.
+    await olek.locator(".answer-grid.phone button").first().click()
+    await olek.getByRole("button", { name: "Zatwierdź", exact: true }).click()
+    await tv.locator(".board.reveal").waitFor()
+    const rows = await tv.locator(".standings > li").allTextContents()
+    assert.equal(rows.length, 2)
+    assert.ok(rows.some((row) => row.includes("Ala") && row.includes("wyszedł")), rows.join(" | "))
+    assert.ok(!rows.some((row) => row.includes("brak odpowiedzi")))
+
+    // The round ends: she is gone from the roster.
+    await tv.getByRole("button", { name: "Zakończ", exact: true }).click()
+    await tv.getByRole("button", { name: "Naciśnij jeszcze raz, żeby zakończyć" }).click()
+    await tv.locator(".board.final").waitFor()
+    assert.ok(!(await tv.locator(".board.final").textContent())?.includes("Ala"))
+    await tvContext.close()
+  })
 })

@@ -37,7 +37,7 @@ export function RevealBoard({
       <ScoreList snapshot={snapshot} busy={busy} onRemove={onRemove} />
       <div className="board-foot">
         {waiting && (
-          <p className="hint">
+          <p className={snapshot.advancePaused ? "hint paused" : "hint"}>
             {snapshot.advancePaused
               ? t.holdingLeft(Math.ceil(left / 1000))
               : left <= 0
@@ -56,7 +56,7 @@ export function RevealBoard({
           )}
           <ConfirmButton label={t.end} confirmLabel={t.endConfirm} disabled={busy} onConfirm={onEnd} />
           {snapshot.settings.autoAdvance && (
-            <p className="hint keys-hint">{snapshot.advancePaused ? t.holding : t.keysHint}</p>
+            <p className="hint keys-hint">{snapshot.advancePaused ? t.keysHintPaused : t.keysHint}</p>
           )}
         </div>
       </div>
@@ -88,8 +88,13 @@ function ScoreList({
   const byId = new Map(results.map((result) => [result.playerId, result]))
   const rows = playerRows(snapshot.players).map((row) => {
     const result = byId.get(row.id)
-    const detail = result ? resultPace(result, snapshot.players.length > 12) : t.joinedLate
-    const withDetail = { ...row, detail, tone: result ? (result.correct ? "gain" : "miss") : undefined } as const
+    const detail = row.gone
+      ? t.playerLeft
+      : result
+        ? resultPace(result, snapshot.players.length > 12)
+        : t.joinedLate
+    const tone = result && !row.gone ? (result.correct ? "gain" : "miss") : undefined
+    const withDetail = { ...row, detail, tone } as const
     if (!row.away) return withDetail
     const name = snapshot.players.find((player) => player.id === row.id)?.name ?? row.name
     return {

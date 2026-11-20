@@ -27,6 +27,7 @@ function player(id: string, overrides: Partial<PublicPlayer> = {}): PublicPlayer
     connected: true,
     picked: false,
     locked: false,
+    left: false,
     rank: 1,
     previousRank: null,
     ...overrides,

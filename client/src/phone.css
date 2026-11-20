@@ -84,3 +84,21 @@
   .answer-grid.phone .answer { min-height: 64px; padding: 4px 12px; }
   .lockbar .hint { display: none; }
 }
+
+/* Leave during a round: small, apart from the mute button, and it needs a second tap. */
+.phone-tools { align-items: center; }
+
+.phone-tools .phone-leave {
+  margin-right: auto;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  box-shadow: none;
+  background: transparent;
+}
+
+.phone-tools .phone-leave.armed {
+  background: #e23b3b;
+  color: #fff;
+}

@@ -10,6 +10,7 @@ import {
   readPlayerFor,
   savePlayer,
 } from "../client/src/playerSession.ts"
+import { NBSP } from "../client/src/strings.ts"
 import type { PublicPlayer } from "../shared/types.ts"
 
 function fakeStorage(initial: Record<string, string> = {}) {
@@ -76,23 +77,34 @@ describe("player session storage", () => {
 })
 
 function player(id: string, score: number, rank: number): PublicPlayer {
-  return { id, name: id, score, rank, previousRank: null } as unknown as PublicPlayer
+  return { id, name: id, score, rank, previousRank: null, left: false } as unknown as PublicPlayer
 }
 
 describe("placeText", () => {
   it("says you lead when alone on top", () => {
-    assert.equal(placeText([player("a", 900, 1), player("b", 400, 2)], "a"), "1. miejsce · prowadzisz")
+    assert.equal(placeText([player("a", 900, 1), player("b", 400, 2)], "a"), `1.${NBSP}miejsce · prowadzisz`)
   })
   it("says tied for first", () => {
-    assert.equal(placeText([player("a", 900, 1), player("b", 900, 1)], "b"), "1. miejsce ex aequo")
+    assert.equal(placeText([player("a", 900, 1), player("b", 900, 1)], "b"), `1.${NBSP}miejsce${NBSP}ex${NBSP}aequo`)
   })
   it("shows place and the gap to the leader", () => {
     const players = [player("a", 900, 1), player("b", 700, 2), player("c", 650, 3)]
-    assert.equal(placeText(players, "c"), "3. miejsce · 250 pkt do lidera")
+    assert.equal(placeText(players, "c"), `3.${NBSP}miejsce · 250${NBSP}pkt${NBSP}do${NBSP}lidera`)
   })
   it("shares a place on a tie below the lead", () => {
     const players = [player("a", 900, 1), player("b", 500, 2), player("c", 500, 2)]
     assert.equal(placeText(players, "b"), placeText(players, "c"))
+  })
+  it("wraps only at the separator on a narrow phone", () => {
+    const players = [player("a", 2000, 1), player("b", 784, 2)]
+    const line = placeText(players, "b") ?? ""
+    assert.equal(line, `2.${NBSP}miejsce · 1${NBSP}216${NBSP}pkt${NBSP}do${NBSP}lidera`)
+    assert.deepEqual(line.split(" "), [`2.${NBSP}miejsce`, "·", `1${NBSP}216${NBSP}pkt${NBSP}do${NBSP}lidera`])
+  })
+  it("ignores a player who left when finding the leader", () => {
+    const players = [{ ...player("a", 2000, 0), left: true }, player("b", 900, 1), player("c", 400, 2)]
+    assert.equal(placeText(players, "b"), `1.${NBSP}miejsce · prowadzisz`)
+    assert.equal(placeText(players, "c"), `2.${NBSP}miejsce · 500${NBSP}pkt${NBSP}do${NBSP}lidera`)
   })
   it("returns null for an unknown player", () => {
     assert.equal(placeText([player("a", 1, 1)], "zz"), null)

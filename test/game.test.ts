@@ -216,21 +216,98 @@ describe("leaving and removal", () => {
     assert.equal(removePlayer(room, "nobody"), room)
   })
 
-  it("keeps a leaving player's score once finished and refuses token reattach", () => {
+  it("frees the seat at once when a player leaves after the round", () => {
     let room = addPlayer(roomWith(), "p1", "Ada")
+    room = addPlayer(room, "p2", "Bea")
     room = playing(room, question("a", 0), 0)
-    room = applyTick(lockAnswer(submitChoice(room, "p1", 0, 0), "p1", 0), 0)
-    assert.ok((room.players[0]?.score ?? 0) > 0)
+    room = applyTick(lockAnswer(submitChoice(room, "p1", 0, 0), "p1", 0), duration)
     room = endGame(room)
     room = leavePlayer(room, "p1")
-    assert.equal(room.players.length, 1)
-    assert.equal(room.players[0]?.connected, false)
-    assert.equal(room.players[0]?.token, "")
-    assert.ok((room.players[0]?.score ?? 0) > 0)
-    assert.throws(() => reconnectPlayer(room, "p1", ""), /rejoin/)
-    const back = joinPlayer(room, { id: "n", name: "Ada", token: "fresh" })
-    assert.equal(back.player.id, "p1")
-    assert.equal(back.player.token, "fresh")
+    assert.deepEqual(room.players.map((p) => p.id), ["p2"])
+    assert.equal(resetRound(room).players.length, 1)
+    assert.throws(() => reconnectPlayer(room, "p1", "token-p1"), /rejoin/)
+  })
+
+  it("keeps a player who left mid-round in the standings, marked gone, and stops waiting for them", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = addPlayer(room, "p2", "Bea")
+    room = playing(room, question("a", 0), 0)
+    room = lockAnswer(submitChoice(room, "p1", 0, 100), "p1", 200)
+    room = submitChoice(room, "p2", 1, 300)
+    room = leavePlayer(room, "p2")
+    assert.equal(room.answers.p2, undefined)
+    assert.equal(room.players.find((p) => p.id === "p2")?.left, true)
+    assert.throws(() => reconnectPlayer(room, "p2", "token-p2"), /rejoin/)
+    // Ada is the only player still to lock, so the question reveals at once.
+    const shown = applyTick(room, 400)
+    assert.equal(shown.phase, "reveal")
+    assert.deepEqual(shown.reveal?.results.map((r) => r.playerId), ["p1"])
+    const snap = snapshotFor(shown, { role: "host" }, 400, [])
+    const gone = snap.players.find((p) => p.id === "p2")
+    assert.equal(gone?.left, true)
+    assert.equal(gone?.rank, 0)
+    assert.equal(snap.players.find((p) => p.id === "p1")?.rank, 1)
+  })
+
+  it("keeps a leaver's earned points visible but never lists them again in later reveals", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = addPlayer(room, "p2", "Bea")
+    room = playing(room, question("a", 0), 0)
+    room = lockAnswer(submitChoice(room, "p1", 0, 0), "p1", 0)
+    room = applyTick(lockAnswer(submitChoice(room, "p2", 0, 0), "p2", 0), 0)
+    assert.equal(room.phase, "reveal")
+    room = leavePlayer(room, "p2")
+    const earned = room.players.find((p) => p.id === "p2")?.score ?? 0
+    assert.ok(earned > 0)
+    room = openedNext(room, question("b", 1), 10_000)
+    assert.equal(room.players.find((p) => p.id === "p2")?.score, earned)
+    room = applyTick(lockAnswer(submitChoice(room, "p1", 1, 10_100), "p1", 10_100), 10_200)
+    assert.equal(room.phase, "reveal")
+    assert.deepEqual(room.reveal?.results.map((r) => r.playerId), ["p1"])
+    assert.equal(room.reveal?.counts.reduce((a, b) => a + b, 0), 1)
+    assert.equal(room.history.filter((h) => h.playerId === "p2").length, 1)
+  })
+
+  it("drops players who left when the round ends or a new one starts", () => {
+    const base = () => {
+      let room = addPlayer(roomWith(), "p1", "Ada")
+      room = addPlayer(room, "p2", "Bea")
+      room = playing(room, question("a", 0), 0)
+      return leavePlayer(room, "p2")
+    }
+    assert.deepEqual(endGame(base()).players.map((p) => p.id), ["p1"])
+    const lastQuestion = applyTick(base(), duration)
+    assert.deepEqual(nextQuestion(lastQuestion, null, duration).players.map((p) => p.id), ["p1"])
+    assert.deepEqual(resetRound({ ...base() }).players.map((p) => p.id), ["p1"])
+  })
+
+  it("lets a new player take the name of one who left, as a fresh player", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = playing(room, question("a", 0), 0)
+    room = leavePlayer(room, "p1")
+    const back = joinPlayer(room, { id: "n", name: "ada", token: "fresh" })
+    assert.equal(back.player.id, "n")
+    assert.equal(back.player.score, 0)
+    assert.deepEqual(back.room.players.map((p) => p.id), ["n"])
+  })
+
+  it("frees a full room's seats held by players who left", () => {
+    let room = roomWith()
+    for (let i = 0; i < 20; i++) room = addPlayer(room, `p${i}`, `Gracz ${i}`)
+    room = playing(room, question("a", 0), 0)
+    assert.throws(() => addPlayer(room, "x", "Nowy"), /room_full/)
+    room = leavePlayer(room, "p3")
+    assert.equal(addPlayer(room, "x", "Nowy").players.length, 20)
+  })
+
+  it("does not wait for a player who is only disconnected, and keeps their seat", () => {
+    let room = addPlayer(roomWith(), "p1", "Ada")
+    room = addPlayer(room, "p2", "Bea")
+    room = playing(room, question("a", 0), 0)
+    room = setPlayerConnected(room, "p2", false)
+    assert.equal(room.players.find((p) => p.id === "p2")?.left, false)
+    assert.equal(snapshotFor(room, { role: "host" }, 0, []).players.find((p) => p.id === "p2")?.rank, 1)
+    assert.equal(reconnectPlayer(room, "p2", "token-p2").players.find((p) => p.id === "p2")?.connected, true)
   })
 
   it("reveals early after removing the only unlocked player", () => {
@@ -324,13 +401,24 @@ describe("ranks and counts", () => {
     const byId = Object.fromEntries(snap.players.map((p) => [p.id, p]))
     assert.equal(byId.c?.score, 50 + 1000)
     assert.equal(byId.c?.rank, 1)
-    assert.equal(byId.c?.previousRank, 3)
     assert.equal(byId.a?.rank, 2)
-    assert.equal(byId.a?.previousRank, 1)
-    assert.equal(byId.b?.previousRank, 1)
-    const late = addPlayer(game, "d", "Dee")
-    assert.equal(snapshotFor(late, { role: "host" }, duration, []).players.find((p) => p.id === "d")?.previousRank, null)
-    const finished = endGame(game)
+    // The first question of a round has no earlier standings, so nothing moved.
+    assert.ok(snap.players.every((p) => p.previousRank === null))
+    // On the second question the places before it are the standings after the first.
+    const second = applyTick(
+      lockAnswer(submitChoice(openedNext(game, question("q2", 0), 30_000), "b", 0, 30_000), "b", 30_000),
+      30_000 + duration,
+    )
+    const byId2 = Object.fromEntries(snapshotFor(second, { role: "host" }, 30_000 + duration, []).players.map((p) => [p.id, p]))
+    assert.equal(byId2.c?.previousRank, 1)
+    assert.equal(byId2.c?.rank, 2)
+    assert.equal(byId2.b?.previousRank, 2)
+    assert.equal(byId2.b?.rank, 1)
+    assert.equal(byId2.a?.previousRank, 2)
+    assert.equal(byId2.a?.rank, 3)
+    const late = addPlayer(second, "d", "Dee")
+    assert.equal(snapshotFor(late, { role: "host" }, 30_000 + duration, []).players.find((p) => p.id === "d")?.previousRank, null)
+    const finished = endGame(second)
     assert.ok(snapshotFor(finished, { role: "host" }, duration, []).players.every((p) => p.previousRank === null))
   })
 
@@ -417,7 +505,9 @@ describe("restoring a stored room", () => {
     const snap = snapshotFor(room, { role: "host" }, 0, [])
     assert.equal(snap.reveal?.counts[3], 1)
     assert.equal(snap.players[0]?.rank, 1)
-    assert.equal(snap.players[0]?.previousRank, 1)
+    assert.equal(snap.players[0]?.previousRank, null)
+    assert.equal(snap.players[0]?.left, false)
+    assert.equal(room.players[0]?.left, false)
     assert.equal(restoreRoom({ ...stored, activeDurationMs: 1 }).activeDurationMs, 30_000)
     assert.equal(restoreRoom({ ...stored, activeDurationMs: 7_000 }).activeDurationMs, 7_000)
     assert.equal(restoreRoom({ ...stored, stalled: true, lastActivityAt: 5 }).stalled, true)

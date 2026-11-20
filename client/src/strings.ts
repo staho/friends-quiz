@@ -115,7 +115,6 @@ export const t = {
   resume: "Wznów",
   nextNow: "Już następne pytanie",
   theAnswer: "Poprawna odpowiedź",
-  holding: "Pauza",
   spacePauses: "Spacja – pauza",
   noAnswer: "brak odpowiedzi",
   miss: "pudło",
@@ -156,6 +155,7 @@ export const t = {
   newRoomConfirm: "Naciśnij jeszcze raz: nowy pokój",
   endConfirm: "Naciśnij jeszcze raz, żeby zakończyć",
   keysHint: "Enter / → – dalej · Spacja – pauza",
+  keysHintPaused: "Enter / → – dalej · Spacja – wznów",
   answerTimeNextQuestion: "Zadziała od następnego pytania",
   // --- end WP2 TV ---
 
@@ -179,12 +179,15 @@ export const t = {
   roomGone: "Tego pokoju już nie ma. Poproś o nowy kod z telewizora.",
   seatLost: "Dołącz jeszcze raz.",
   removedByHost: "Usunięto cię z gry.",
-  youLead: "1. miejsce · prowadzisz",
-  tiedFirst: "1. miejsce ex aequo",
-  placeGap: "{rank}. miejsce · {gap} do lidera",
+  // No-break spaces inside each half, so a narrow phone wraps only at the " · ".
+  youLead: `1.${NBSP}miejsce · prowadzisz`,
+  tiedFirst: `1.${NBSP}miejsce${NBSP}ex${NBSP}aequo`,
+  placeGap: `{rank}.${NBSP}miejsce · {gap}${NBSP}do${NBSP}lidera`,
   joinedLateWait: "Runda już trwa. Wskakujesz od następnego pytania.",
   secsLeftShort: (n: number) => `${n}${NBSP}s`,
   changeHint: "Możesz jeszcze zmienić.",
+  leaveConfirm: "Na pewno wyjść?",
+  playerLeft: "wyszedł",
   // --- end WP6 phone ---
 
   // --- WP7 meta ---

@@ -88,9 +88,10 @@ export function prunePlayers(s: Pruner | null, now: number): void {
 export function placeText(players: readonly PublicPlayer[], myId: string): string | null {
   const me = players.find((player) => player.id === myId)
   if (!me) return null
-  const leader = players.reduce((max, player) => Math.max(max, player.score), 0)
+  const inGame = players.filter((player) => !player.left)
+  const leader = inGame.reduce((max, player) => Math.max(max, player.score), 0)
   if (me.rank === 1) {
-    return players.some((player) => player.id !== myId && player.rank === 1) ? t.tiedFirst : t.youLead
+    return inGame.some((player) => player.id !== myId && player.rank === 1) ? t.tiedFirst : t.youLead
   }
   return fmt(t.placeGap, { rank: me.rank, gap: formatPoints(leader - me.score) })
 }

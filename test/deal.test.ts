@@ -66,7 +66,7 @@ describe("shuffling answers", () => {
 
   it("passes the round's category counts to the picker", async () => {
     let room = createRoom({ code: "QUIZ", hostToken: "h" })
-    room = { ...startGame({ ...room, players: [{ id: "p", name: "A", score: 0, connected: true, token: "t" }] }, original, 0) }
+    room = { ...startGame({ ...room, players: [{ id: "p", name: "A", score: 0, connected: true, token: "t", left: false }] }, original, 0) }
     assert.deepEqual(roundCategoryCounts(room), { colours: 1 })
     let received: Record<string, number> | undefined
     await takeFromDeck(room, 1, null, async (_ex, _d, _b, counts) => {

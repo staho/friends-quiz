@@ -11,6 +11,7 @@ import { local } from "../storage"
 import { useRoom } from "../useRoom"
 import { usePlayerSounds } from "../useSounds"
 import { formatNumber, formatPoints, t } from "../strings"
+import { ConfirmButton } from "./host/ConfirmButton"
 
 export function PlayerScreen() {
   const { snapshot, connected } = useRoom()
@@ -118,6 +119,14 @@ export function PlayerScreen() {
       ) : playing ? (
         <>
           <div className="phone-tools">
+            {inRound(playing.phase) && (
+              <ConfirmButton
+                label={t.leave}
+                confirmLabel={t.leaveConfirm}
+                className="btn ghost phone-leave"
+                onConfirm={() => leave(playing.code)}
+              />
+            )}
             <MuteButton />
           </div>
           <Play snapshot={playing} onError={setError} />
@@ -362,6 +371,11 @@ function GetReady({ ready }: { ready: NonNullable<RoomSnapshot["ready"]> }) {
       <p className="hint">{t.questionOf(ready.index + 1, ready.total)}</p>
     </section>
   )
+}
+
+/** Lobby and final have their own Leave button; during a round it is a small one that asks twice. */
+function inRound(phase: RoomSnapshot["phase"]): boolean {
+  return phase === "ready" || phase === "question" || phase === "reveal"
 }
 
 function paceHint(result: RevealResult): string {

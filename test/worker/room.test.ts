@@ -141,6 +141,37 @@ describe("room Durable Object over WebSockets", { timeout: 120_000 }, () => {
     assert.equal(state.you.role === "player" && state.you.score, 0)
   })
 
+  // The server accepts a late joiner's answer for the question in progress, so the phone plays it
+  // and the TV counts them; only a joiner during a reveal waits for the next question.
+  it("lets a player who joins mid-question answer it and counts them on the TV", { timeout: 20_000 }, async () => {
+    const { code, host } = await newRoom()
+    const ala = await join(code, "Ala")
+    await ok(host, "host:start")
+    await host.waitFor((s) => s.phase === "question")
+    const late = await join(code, "Spóźniony")
+    const open = await host.waitFor((s) => s.players.length === 2)
+    assert.equal(open.players.filter((p) => p.connected && p.locked).length, 0)
+    await ok(ala.client, "player:choose", { choiceIndex: 0 })
+    await ok(ala.client, "player:lock")
+    assert.equal(host.state?.phase, "question", "the question waits for the late joiner")
+    await ok(late.client, "player:choose", { choiceIndex: 1 })
+    await ok(late.client, "player:lock")
+    const shown = await host.waitFor((s) => s.phase === "reveal")
+    assert.deepEqual(
+      shown.reveal?.results.map((r) => r.name).sort(),
+      ["Ala", "Spóźniony"],
+    )
+  })
+
+  it("gives a player who joins during a reveal no row until the next question", { timeout: 20_000 }, async () => {
+    const { code, host } = await toReveal()
+    const late = await join(code, "Spóźniony")
+    const state = await late.client.waitFor((s) => s.you.role === "player")
+    assert.equal(state.phase, "reveal")
+    assert.ok(!state.reveal?.results.some((r) => r.name === "Spóźniony"))
+    assert.equal(host.state?.players.length, 2)
+  })
+
   it("removes a player on host:remove and shows the socket a guest view", { timeout: 20_000 }, async () => {
     const { code, host } = await newRoom()
     const ala = await join(code, "Ala")
@@ -162,11 +193,20 @@ describe("room Durable Object over WebSockets", { timeout: 120_000 }, () => {
     // Ala never answers; when she leaves, everyone left has locked, so the question reveals at once.
     await ok(ala.client, "player:leave")
     const state = await host.waitFor((s) => s.phase === "reveal", 3_000)
-    assert.equal(state.players.length, 1)
+    // Ala stays in the standings, marked gone, but is not in the reveal and holds no place.
+    assert.deepEqual(state.reveal?.results.map((r) => r.name), ["Olek"])
+    const gone = state.players.find((p) => p.name === "Ala")
+    assert.equal(gone?.left, true)
+    assert.equal(gone?.rank, 0)
     // The leaving socket is a guest now and cannot act as a player.
     const reply = await ala.client.rpc("player:lock")
     assert.equal(reply.ok, false)
     assert.equal(reply.error, "join_first")
+    // When the round ends she is gone from the roster, so the next lobby does not list her.
+    await ok(host, "host:end")
+    await ok(host, "host:reset")
+    const lobby = await host.waitFor((s) => s.phase === "lobby")
+    assert.deepEqual(lobby.players.map((p) => p.name), ["Olek"])
   })
 
   it("caps join attempts per socket", async () => {

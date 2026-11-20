@@ -70,6 +70,8 @@ export interface Player {
   score: number
   connected: boolean
   token: string
+  /** Pressed Leave during a round. Kept only so the standings still show the points, until the round ends. */
+  left: boolean
 }
 
 export interface PlayerAnswer {
@@ -267,7 +269,7 @@ export function restoreRoom(raw: unknown): Room {
   return {
     code: value.code,
     hostToken: value.hostToken,
-    players: value.players ?? [],
+    players: readPlayers(value.players),
     asked: readAsked(value, phase, legacy),
     seen: readSeen(value.seen),
     history: value.history ?? [],
@@ -290,6 +292,11 @@ export function restoreRoom(raw: unknown): Room {
       typeof value.lastActivityAt === "number" && Number.isFinite(value.lastActivityAt) ? value.lastActivityAt : 0,
     stalled: value.stalled === true,
   }
+}
+
+function readPlayers(value: unknown): Player[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => ({ ...(item as Player), left: (item as Partial<Player>).left === true }))
 }
 
 function readActiveDuration(value: unknown, fallback: number): number {
@@ -448,6 +455,8 @@ export function joinPlayer(
     return { room: replacePlayer(room, player), player }
   }
 
+  // A player who pressed Leave is gone for good: a new join under the same name is a new player.
+  if (room.players.some((player) => player.left && sameName(player.name, name))) room = dropGone(room)
   const byName = room.players.find((player) => sameName(player.name, name))
   if (byName) {
     if (!byName.connected) {
@@ -457,6 +466,7 @@ export function joinPlayer(
     throw new GameError("name_taken")
   }
 
+  if (room.players.length >= MAX_PLAYERS) room = dropGone(room)
   if (room.players.length >= MAX_PLAYERS) throw new GameError("room_full")
 
   const player: Player = {
@@ -465,6 +475,7 @@ export function joinPlayer(
     score: 0,
     connected: true,
     token: input.token,
+    left: false,
   }
   return { room: { ...room, players: [...room.players, player] }, player }
 }
@@ -475,11 +486,21 @@ export function removePlayer(room: Room, playerId: string): Room {
   return { ...room, players: room.players.filter((player) => player.id !== playerId), answers }
 }
 
+/** Lobby and final board: the seat is freed at once. In a round the row stays, marked gone, until the round ends. */
 export function leavePlayer(room: Room, playerId: string): Room {
-  if (room.phase !== "finished") return removePlayer(room, playerId)
   const player = room.players.find((item) => item.id === playerId)
   if (!player) return room
-  return replacePlayer(room, { ...player, connected: false, token: "" })
+  if (room.phase === "lobby" || room.phase === "finished") return removePlayer(room, playerId)
+  const { [playerId]: _answer, ...answers } = room.answers
+  return replacePlayer({ ...room, answers }, { ...player, connected: false, token: "", left: true })
+}
+
+/** Drops the players who left, once a round has ended or a new one starts. */
+export function dropGone(room: Room): Room {
+  if (!room.players.some((player) => player.left)) return room
+  const players = room.players.filter((player) => !player.left)
+  const answers = Object.fromEntries(Object.entries(room.answers).filter(([id]) => players.some((player) => player.id === id)))
+  return { ...room, players, answers }
 }
 
 export function reconnectPlayer(room: Room, playerId: string, token: string): Room {
@@ -647,7 +668,7 @@ export function reveal(room: Room, now: number): Room {
   }
   const question = currentQuestion(room)
   const history: AnswerRecord[] = []
-  const results: RevealResult[] = room.players.map((player) => {
+  const results: RevealResult[] = room.players.filter((player) => !player.left).map((player) => {
     const answer = room.answers[player.id]
     const choiceIndex = answer?.choiceIndex ?? null
     const correct = choiceIndex === question.correctIndex
@@ -704,7 +725,7 @@ export function nextQuestion(room: Room, question: Question | null, now: number)
   if (room.phase !== "reveal") throw new GameError("reveal_first")
   if (question == null || room.asked.length >= room.questionLimit) {
     return {
-      ...room,
+      ...dropGone(room),
       phase: "finished",
       questionStartedAt: null,
       readyUntil: null,
@@ -728,7 +749,7 @@ export function endGame(room: Room): Room {
   if (room.phase === "lobby") throw new GameError("not_started")
   if (room.phase === "finished") return room
   return {
-    ...room,
+    ...dropGone(room),
     phase: "finished",
     questionStartedAt: null,
     readyUntil: null,
@@ -765,8 +786,8 @@ export function competitionRanks(scores: Map<string, number>): Map<string, numbe
 
 export function resetRound(room: Room): Room {
   return {
-    ...room,
-    players: room.players.map((player) => ({ ...player, score: 0 })),
+    ...dropGone(room),
+    players: dropGone(room).players.map((player) => ({ ...player, score: 0 })),
     asked: [],
     history: [],
     questionIndex: 0,
@@ -787,7 +808,7 @@ export function snapshotFor(room: Room, viewer: Viewer, now: number, lanAddresse
       ? playerView(room, viewer.playerId)
       : { role: "host" }
 
-  const ranks = competitionRanks(new Map(room.players.map((player) => [player.id, player.score])))
+  const ranks = competitionRanks(new Map(room.players.filter((player) => !player.left).map((player) => [player.id, player.score])))
   const previousRanks = previousRankMap(room)
   return {
     code: room.code,
@@ -799,7 +820,8 @@ export function snapshotFor(room: Room, viewer: Viewer, now: number, lanAddresse
       connected: player.connected,
       picked: room.answers[player.id] != null,
       locked: room.answers[player.id]?.locked === true,
-      rank: ranks.get(player.id) ?? 1,
+      left: player.left,
+      rank: ranks.get(player.id) ?? 0,
       previousRank: previousRanks.get(player.id) ?? null,
     })),
     question: question
@@ -825,9 +847,12 @@ export function snapshotFor(room: Room, viewer: Viewer, now: number, lanAddresse
   }
 }
 
+/** Places before this question, so a move is a real change. The first question of a round has nothing to compare with. */
 function previousRankMap(room: Room): Map<string, number> {
-  if (room.phase !== "reveal" || !room.reveal) return new Map()
-  return competitionRanks(new Map(room.reveal.results.map((result) => [result.playerId, result.score - result.points])))
+  if (room.phase !== "reveal" || !room.reveal || room.questionIndex === 0) return new Map()
+  const gone = new Set(room.players.filter((player) => player.left).map((player) => player.id))
+  const before = room.reveal.results.filter((result) => !gone.has(result.playerId))
+  return competitionRanks(new Map(before.map((result) => [result.playerId, result.score - result.points])))
 }
 
 export function normalizeName(input: string): string {
