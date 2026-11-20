@@ -143,6 +143,12 @@ export const t = {
   points: (n: number) => `${formatNumber(n)} ${pointsWord(n)}`,
 
   // --- WP2 TV ---
+  hostReconnecting: "Łączę z twoim pokojem…",
+  newRoom: "Nowy pokój",
+  newRoomConfirm: "Naciśnij jeszcze raz: nowy pokój",
+  endConfirm: "Naciśnij jeszcze raz, żeby zakończyć",
+  keysHint: "Enter / → – dalej · Spacja – pauza",
+  answerTimeNextQuestion: "Zadziała od następnego pytania",
   // --- end WP2 TV ---
 
   // --- WP4 connection ---

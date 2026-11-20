@@ -2,6 +2,7 @@ import type { RoomSettings, RoomSnapshot } from "@shared/types"
 import { AnswerGrid, TimerBar } from "../../components"
 import { useCountdown } from "../../useCountdown"
 import { t } from "../../strings"
+import { ConfirmButton } from "./ConfirmButton"
 import { RoundSettings } from "./HostSettings"
 
 export function QuestionBoard({
@@ -25,16 +26,14 @@ export function QuestionBoard({
     <section className="board question">
       <p className="kicker">{t.questionKicker(question.index + 1, question.total, question.difficulty)}</p>
       <h1 className="prompt">{question.prompt}</h1>
-      <TimerBar leftMs={left} durationMs={question.durationMs} />
+      <TimerBar remainingMs={question.remainingMs} durationMs={question.durationMs} leftMs={left} />
       <AnswerGrid choices={question.choices} selected={null} />
       <p className="hint">
         {t.lockedCount(locked.length, active.length)}
         {waiting.length > 0 ? t.waitingOn(waiting.map((player) => player.name)) : ""}
       </p>
       <div className="controls">
-        <button type="button" className="btn ghost" disabled={busy} onClick={onEnd}>
-          {t.end}
-        </button>
+        <ConfirmButton label={t.end} confirmLabel={t.endConfirm} disabled={busy} onConfirm={onEnd} />
       </div>
       <RoundSettings snapshot={snapshot} busy={busy} onSettings={onSettings} />
     </section>

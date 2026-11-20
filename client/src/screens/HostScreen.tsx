@@ -3,6 +3,9 @@ import type { HostSession, RoomSettings, RoomSnapshot } from "@shared/types"
 import { MuteButton } from "../MuteButton"
 import { request, socket } from "../socket"
 import { useRoom } from "../useRoom"
+import { errorCode, errorText } from "../errors"
+import { decideAfterAttachFailure, forgetHost, migrateLegacyHost, pruneHosts, readLastHost, retryDelayMs, saveHost } from "../hostSession"
+import { local } from "../storage"
 import { t } from "../strings"
 import { useHostSounds } from "../useSounds"
 import { FinalBoard } from "./host/FinalBoard"
@@ -10,30 +13,54 @@ import { LobbyBoard } from "./host/LobbyBoard"
 import { QuestionBoard } from "./host/QuestionBoard"
 import { ReadyBoard } from "./host/ReadyBoard"
 import { RevealBoard } from "./host/RevealBoard"
-
-const HOST_KEY = "friends-quiz-host"
+import { ConfirmButton } from "./host/ConfirmButton"
+import { useHostKeys } from "./host/useHostKeys"
 
 let hostAttempt: Promise<void> | null = null
 
 export function HostScreen() {
   const { snapshot, connected } = useRoom()
   const [error, setError] = useState<string | null>(null)
+  const [bindError, setBindError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
+    let alive = true
+    let timer = 0
+    let attempt = 0
     const boot = () => {
-      void openOrAttach()
-        .then(() => setError(null))
-        .catch((err: unknown) => {
-          setError(err instanceof Error ? err.message : t.couldNotOpen)
-        })
+      window.clearTimeout(timer)
+      attempt = 0
+      const go = () => {
+        openOrAttach(false).then(
+          () => {
+            if (alive) setBindError(null)
+          },
+          (err: unknown) => {
+            if (!alive) return
+            setBindError(readLastHost(local()) ? t.hostReconnecting : errorText(errorCode(err)))
+            timer = window.setTimeout(go, retryDelayMs(attempt++))
+          },
+        )
+      }
+      go()
     }
     socket.on("connect", boot)
     if (socket.connected) boot()
     return () => {
+      alive = false
+      window.clearTimeout(timer)
       socket.off("connect", boot)
     }
   }, [])
+
+  useHostKeys({
+    snapshot,
+    busy,
+    onStart: () => void run(() => request((ack) => socket.emit("host:start", ack))),
+    onNext: () => void run(() => request((ack) => socket.emit("host:next", ack))),
+    onPause: () => void run(() => request((ack) => socket.emit("host:pause", ack))),
+  })
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true)
@@ -53,11 +80,18 @@ export function HostScreen() {
       <div className="stage-bar">
         <p className="eyebrow">{t.appName}</p>
         <div className="stage-tools">
+          <ConfirmButton
+            label={t.newRoom}
+            confirmLabel={t.newRoomConfirm}
+            disabled={busy}
+            onConfirm={() => void run(() => openOrAttach(true))}
+          />
           <MuteButton />
           <FullScreenToggle />
         </div>
       </div>
       {!connected && <p className="banner">{t.reconnecting}</p>}
+      {bindError && <p className="banner">{bindError}</p>}
       {error && <p className="banner">{error}</p>}
       {!snapshot ? (
         <p className="waiting">{t.settingUp}</p>
@@ -212,35 +246,41 @@ function HostSoundTrack({ snapshot }: { snapshot: RoomSnapshot | null }) {
   return null
 }
 
-function openOrAttach(): Promise<void> {
-  if (hostAttempt) return hostAttempt
-  hostAttempt = bindHost().finally(() => {
+async function openOrAttach(forceNew: boolean): Promise<void> {
+  if (hostAttempt) {
+    const running = hostAttempt
+    if (!forceNew) return running
+    await running.catch(() => undefined)
+  }
+  hostAttempt = bindHost(forceNew).finally(() => {
     hostAttempt = null
   })
   return hostAttempt
 }
 
-async function bindHost(): Promise<void> {
-  const saved = readHost()
+async function bindHost(forceNew: boolean): Promise<void> {
+  const store = local()
+  migrateLegacyHost(store, sessionOrNull())
+  pruneHosts(store, Date.now())
+  const saved = forceNew ? null : readLastHost(store)
   if (saved) {
     try {
-      await request<HostSession>((ack) => socket.emit("host:attach", saved, ack))
+      await request<HostSession>((ack) => socket.emit("host:attach", { code: saved.code, hostToken: saved.hostToken }, ack))
+      saveHost(store, saved, Date.now())
       return
-    } catch {
-      sessionStorage.removeItem(HOST_KEY)
+    } catch (err) {
+      const code = errorCode(err)
+      if (decideAfterAttachFailure(code) === "retry") throw err
+      forgetHost(store, saved.code)
     }
   }
   const session = await request<HostSession>((ack) => socket.emit("host:create", ack))
-  sessionStorage.setItem(HOST_KEY, JSON.stringify(session))
+  saveHost(store, session, Date.now())
 }
 
-function readHost(): HostSession | null {
-  const raw = sessionStorage.getItem(HOST_KEY)
-  if (!raw) return null
+function sessionOrNull(): Storage | null {
   try {
-    const parsed = JSON.parse(raw) as HostSession
-    if (!parsed.code || !parsed.hostToken) return null
-    return parsed
+    return window.sessionStorage
   } catch {
     return null
   }
