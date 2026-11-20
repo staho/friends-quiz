@@ -20,6 +20,7 @@ export function displayedQuestionSecond(leftMs: number): number {
   return Math.ceil(leftMs / 1000)
 }
 
+/** The podium sting is not here: FinalBoard plays it with first place. */
 export function hostCues(prev: HostFrame | null, next: HostFrame): HostCue[] {
   if (!prev || prev.snapshot.code !== next.snapshot.code) return []
   const cues: HostCue[] = []
@@ -49,8 +50,6 @@ export function hostCues(prev: HostFrame | null, next: HostFrame): HostCue[] {
   if (justLockedTable(prev.snapshot, next.snapshot)) cues.push("allLocked")
 
   if (prev.snapshot.phase !== "reveal" && next.snapshot.phase === "reveal") cues.push("reveal")
-
-  if (prev.snapshot.phase !== "finished" && next.snapshot.phase === "finished") cues.push("podium")
 
   return cues
 }

@@ -509,14 +509,14 @@ html:-webkit-full-screen body {
 .standings li {
   display: flex;
   align-items: center;
-  gap: 0.6em;
+  gap: 0.5em;
   min-width: 0;
   min-height: 0;
-  padding: 0 0.7em;
+  padding: 0 0.6em;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--surface);
-  font-size: clamp(0.85rem, min(calc(42cqh / var(--rows, 1)), calc(100cqw / var(--cols, 1) / 14)), 2rem);
+  font-size: clamp(0.85rem, min(calc(42cqh / var(--rows, 1)), calc(100cqw / var(--cols, 1) / var(--fit, 14))), 2rem);
   box-shadow: 0 4px 12px rgba(26, 18, 12, 0.04);
 }
 
@@ -532,12 +532,16 @@ html:-webkit-full-screen body {
 .st-move {
   flex: 0 0 auto;
   font-size: 0.7em;
+  font-weight: 700;
   color: var(--muted);
 }
 
+.st-move.up { color: #128a45; }
+.st-move.down { color: #d4253a; }
+
 .st-name {
   flex: 1 1 auto;
-  min-width: 6ch;
+  min-width: 4ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -551,7 +555,7 @@ html:-webkit-full-screen body {
 }
 
 .st-detail {
-  flex: 0 4 auto;
+  flex: 0 0 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -786,4 +790,166 @@ html:-webkit-full-screen body {
 
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto; }
+}
+
+.kicker-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.category-chip {
+  padding: 4px 16px;
+  border-radius: 999px;
+  background: #1a120c;
+  color: #fff8ee;
+  font-weight: 700;
+  font-size: clamp(0.9rem, 1.4vw, 1.6rem);
+  white-space: nowrap;
+}
+
+.chip-x {
+  margin-left: 10px;
+  min-width: 1.9em;
+  padding: 0 0.6em;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.chip-x.armed { border-color: #e23b3b; }
+
+.standings .chip-x {
+  margin-left: 0;
+  font-size: 0.8em;
+}
+
+.waiting-chips {
+  max-height: 5.4em;
+  overflow: hidden;
+  gap: 6px 10px;
+}
+
+.waiting-chips .chip { padding: 4px 6px 4px 14px; }
+
+.answer.has-count {
+  position: relative;
+  overflow: hidden;
+}
+
+.answer .count {
+  margin-left: auto;
+  flex: 0 0 auto;
+  min-width: 2.2ch;
+  padding: 2px 12px;
+  border-radius: 999px;
+  background: rgba(26, 18, 12, 0.78);
+  color: #fff;
+  font-size: clamp(1.3rem, 2.2vw, 2.4rem);
+  font-weight: 800;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.answer .count-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.final-body {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 14px;
+  min-height: 0;
+}
+
+.final-body.with-rest { grid-template-rows: minmax(0, 1fr) minmax(0, calc(var(--rest-rows, 1) * 5rem)); }
+
+.podium {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: clamp(8px, 1.5vw, 24px);
+  min-height: 0;
+  height: 100%;
+}
+
+.step {
+  flex: 0 1 28%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  text-align: center;
+  opacity: 0;
+  transform: translateY(40px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+
+.step.shown {
+  opacity: 1;
+  transform: none;
+}
+
+.step-1 { height: 100%; flex-basis: 34%; }
+.step-2 { height: 80%; }
+.step-3 { height: 62%; }
+
+.step-who {
+  flex: 0 0 auto;
+  padding-bottom: 8px;
+}
+
+.step-names {
+  margin: 0;
+  font-size: clamp(1.3rem, 2.8vw, 3.2rem);
+  font-weight: 750;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.step-1 .step-names { font-size: clamp(1.6rem, 3.6vw, 4rem); }
+
+.step-score {
+  font-size: clamp(1.1rem, 2vw, 2.2rem);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.step-block {
+  flex: 1 1 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 18px 18px 0 0;
+  color: #fff;
+  font-family: Georgia, "Iowan Old Style", Palatino, serif;
+  font-weight: 800;
+  font-size: clamp(2.5rem, 7vw, 7rem);
+  box-shadow: 0 10px 24px rgba(26, 18, 12, 0.14);
+}
+
+.step-1 .step-block { background: linear-gradient(180deg, #f0b429, #b87500); }
+.step-2 .step-block { background: linear-gradient(180deg, #98a6b4, #4f5e6d); }
+.step-3 .step-block { background: linear-gradient(180deg, #d98a4c, #b05d22); }
+
+@media (prefers-reduced-motion: reduce) {
+  .step { transition: none; transform: none; }
+}
+
+.final-body .standings {
+  grid-template-rows: repeat(var(--rows, 1), minmax(0, 4.5rem));
+  align-content: start;
 }

@@ -93,6 +93,7 @@ export function HostScreen() {
       {!connected && <p className="banner">{t.reconnecting}</p>}
       {bindError && <p className="banner">{bindError}</p>}
       {error && <p className="banner">{error}</p>}
+      {snapshot?.stalled && <p className="banner">{t.dealRetrying}</p>}
       {!snapshot ? (
         <p className="waiting">{t.settingUp}</p>
       ) : (
@@ -103,6 +104,7 @@ export function HostScreen() {
           onNext={() => run(() => request((ack) => socket.emit("host:next", ack)))}
           onPause={() => run(() => request((ack) => socket.emit("host:pause", ack)))}
           onEnd={() => run(() => request((ack) => socket.emit("host:end", ack)))}
+          onRemove={(playerId) => run(() => request((ack) => socket.emit("host:remove", { playerId }, ack)))}
           onReset={() => run(() => request((ack) => socket.emit("host:reset", ack)))}
           onSettings={(settings) => run(() => request((ack) => socket.emit("host:settings", settings, ack)))}
         />
@@ -118,6 +120,7 @@ function HostBody({
   onNext,
   onPause,
   onEnd,
+  onRemove,
   onReset,
   onSettings,
 }: {
@@ -127,11 +130,12 @@ function HostBody({
   onNext: () => void
   onPause: () => void
   onEnd: () => void
+  onRemove: (playerId: string) => void
   onReset: () => void
   onSettings: (settings: RoomSettings) => void
 }) {
   if (snapshot.phase === "lobby") {
-    return <LobbyBoard snapshot={snapshot} busy={busy} onStart={onStart} onSettings={onSettings} />
+    return <LobbyBoard snapshot={snapshot} busy={busy} onStart={onStart} onRemove={onRemove} onSettings={onSettings} />
   }
 
   if (snapshot.phase === "ready" && snapshot.ready) {
@@ -139,7 +143,7 @@ function HostBody({
   }
 
   if (snapshot.phase === "question" && snapshot.question) {
-    return <QuestionBoard snapshot={snapshot} busy={busy} onEnd={onEnd} onSettings={onSettings} />
+    return <QuestionBoard snapshot={snapshot} busy={busy} onEnd={onEnd} onRemove={onRemove} onSettings={onSettings} />
   }
 
   if (snapshot.phase === "reveal" && snapshot.reveal) {
@@ -150,6 +154,7 @@ function HostBody({
         onNext={onNext}
         onPause={onPause}
         onEnd={onEnd}
+        onRemove={onRemove}
         onSettings={onSettings}
       />
     )

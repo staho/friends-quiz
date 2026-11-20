@@ -1,21 +1,25 @@
 import type { CSSProperties } from "react"
 import { CHOICES } from "@shared/types"
-import { t } from "./strings"
+import { fmt, t } from "./strings"
 
 export function AnswerGrid({
   choices,
   selected,
   correctIndex,
+  counts,
   disabled,
   onPick,
 }: {
   choices: readonly string[]
   selected: number | null
   correctIndex?: number | null
+  /** Picks per choice, TV reveal only. */
+  counts?: readonly number[]
   disabled?: boolean
   onPick?: (index: number) => void
 }) {
   const revealed = correctIndex != null
+  const total = counts ? counts.reduce((sum, n) => sum + n, 0) : 0
   return (
     <div className={onPick ? "answer-grid phone" : "answer-grid tv"} role="list">
       {choices.map((choice, index) => {
@@ -27,6 +31,7 @@ export function AnswerGrid({
           revealed && index === correctIndex ? "is-correct" : "",
           revealed && selected === index && index !== correctIndex ? "is-wrong" : "",
           revealed && index !== correctIndex ? "is-dim" : "",
+          counts ? "has-count" : "",
         ]
           .filter(Boolean)
           .join(" ")
@@ -35,6 +40,7 @@ export function AnswerGrid({
           <>
             <span className="letter">{meta.key}</span>
             <span className="label">{choice}</span>
+            {counts && <PickCount n={counts[index] ?? 0} total={total} />}
           </>
         )
         if (!onPick) {
@@ -58,6 +64,18 @@ export function AnswerGrid({
         )
       })}
     </div>
+  )
+}
+
+function PickCount({ n, total }: { n: number; total: number }) {
+  const style = { width: `${(n / Math.max(1, total)) * 100}%` }
+  return (
+    <>
+      <span className="count" role="img" aria-label={fmt(t.pickedBy, { n })}>
+        {n}
+      </span>
+      <span className="count-bar" style={style} aria-hidden="true" />
+    </>
   )
 }
 
