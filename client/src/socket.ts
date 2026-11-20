@@ -25,7 +25,7 @@ type StateListener = (snapshot: RoomSnapshot) => void
 type ConnectionListener = () => void
 type AckListener = (res: Ack<unknown>) => void
 
-class QuizSocket {
+export class QuizSocket {
   connected = true
   private ws: WebSocket | null = null
   private code: string | null = null
@@ -34,6 +34,7 @@ class QuizSocket {
   private reconnectTimer: number | null = null
   private attempt = 0
   private heartbeat: number | null = null
+  private settleOpen: ((error: QuizError) => void) | null = null
   private deadline: number | null = null
   private pending = new Map<string, AckListener>()
   private stateListeners = new Set<StateListener>()
@@ -41,19 +42,54 @@ class QuizSocket {
   private disconnectListeners = new Set<ConnectionListener>()
 
   constructor() {
-    const wake = () => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        this.sendPing()
-      } else if (this.code) {
-        this.clearReconnect()
-        this.attempt = 0
-        void this.ensure(this.code).catch(() => this.scheduleReconnect())
-      }
-    }
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") wake()
+      if (document.visibilityState !== "visible" || !this.code) return
+      if (this.ws?.readyState === WebSocket.OPEN) this.sendPing()
+      else this.reopen()
     })
-    window.addEventListener("online", wake)
+    // After a network change nothing about the old socket can be trusted: replace it.
+    window.addEventListener("online", () => {
+      if (this.code) this.reopen()
+    })
+    window.addEventListener("offline", () => {
+      if (this.ws) this.lose(this.ws)
+    })
+  }
+
+  /** Drop whatever socket we have and open a fresh one right now. */
+  private reopen(): void {
+    const code = this.code
+    if (!code) return
+    this.clearReconnect()
+    if (this.ws) this.retire(this.ws)
+    this.attempt = 0
+    this.opening = null
+    this.openingCode = null
+    void this.ensure(code).catch(() => this.scheduleReconnect())
+  }
+
+  /**
+   * The only place a socket stops being current. Idempotent per socket: a late event from an
+   * already retired socket does nothing. Marks us disconnected at once, so the banner shows and
+   * the next successful open always fires "connect" again (screens re-attach on it).
+   */
+  private retire(ws: WebSocket): boolean {
+    if (this.ws !== ws) return false
+    this.ws = null
+    this.stopHeartbeat()
+    this.failPending("reconnecting")
+    this.settleOpen?.(new QuizError("unreachable"))
+    try {
+      ws.close()
+    } catch {
+      // already gone
+    }
+    this.setConnected(false)
+    return true
+  }
+
+  private lose(ws: WebSocket): void {
+    if (this.retire(ws)) this.scheduleReconnect()
   }
 
   private clearReconnect(): void {
@@ -69,12 +105,12 @@ class QuizSocket {
     try {
       ws.send("ping")
     } catch {
-      ws.close()
+      this.lose(ws)
       return
     }
     this.deadline = window.setTimeout(() => {
       this.deadline = null
-      ws.close()
+      this.lose(ws)
     }, 8000)
   }
 
@@ -125,7 +161,21 @@ class QuizSocket {
     } else if (this.ws?.readyState !== WebSocket.OPEN) {
       throw new QuizError("reconnecting")
     }
-    return this.rpc(message)
+    const sent = this.ws
+    try {
+      return await this.rpc(message)
+    } catch (error) {
+      // The server sees this socket as an unattached guest: our attach was lost. Replace the
+      // socket so the screen re-attaches on "connect" instead of showing the raw error.
+      const code = errorCode(error)
+      const isAttach = message.event === "host:attach" || message.event === "player:attach" || message.event === "player:join"
+      if (!isAttach && (code === "join_first" || code === "host_only") && sent && this.ws === sent) {
+        this.lose(sent)
+        this.reopen()
+        throw new QuizError("reconnecting")
+      }
+      throw error
+    }
   }
 
   private async createHost(): Promise<HostSession> {
@@ -167,36 +217,31 @@ class QuizSocket {
   private open(code: string): Promise<void> {
     this.clearReconnect()
     const previous = this.ws
+    if (previous) this.retire(previous)
     const ws = new WebSocket(socketUrl(code))
     this.ws = ws
     this.code = code
-    previous?.close()
     return new Promise((resolve, reject) => {
       let settled = false
-      ws.addEventListener(
-        "open",
-        () => {
-          if (settled || this.ws !== ws) return
-          settled = true
-          this.attempt = 0
-          this.startHeartbeat()
-          this.setConnected(true)
-          resolve()
-        },
-        { once: true },
-      )
-      ws.addEventListener(
-        "error",
-        () => {
-          if (this.ws !== ws) return
-          if (!settled) {
-            settled = true
-            reject(new QuizError("unreachable"))
-          }
-          ws.close()
-        },
-        { once: true },
-      )
+      let connectTimer: number | null = null
+      const settle = (error?: QuizError) => {
+        if (settled) return
+        settled = true
+        if (connectTimer != null) window.clearTimeout(connectTimer)
+        if (this.settleOpen === settle) this.settleOpen = null
+        if (error) reject(error)
+        else resolve()
+      }
+      this.settleOpen = settle
+      connectTimer = window.setTimeout(() => this.lose(ws), 8000)
+      ws.addEventListener("open", () => {
+        if (settled || this.ws !== ws) return
+        this.attempt = 0
+        this.startHeartbeat()
+        settle()
+        this.setConnected(true)
+      })
+      ws.addEventListener("error", () => this.lose(ws))
       ws.addEventListener("message", (event) => {
         if (this.ws !== ws || typeof event.data !== "string") return
         if (this.deadline != null) {
@@ -205,14 +250,7 @@ class QuizSocket {
         }
         this.onMessage(event.data)
       })
-      ws.addEventListener("close", () => {
-        if (this.ws !== ws) return
-        this.ws = null
-        this.stopHeartbeat()
-        this.failPending("reconnecting")
-        this.setConnected(false)
-        this.scheduleReconnect()
-      })
+      ws.addEventListener("close", () => this.lose(ws))
     })
   }
 
